@@ -1,12 +1,15 @@
 # -- SISTEMA V&C - GENERADOR DE ETIQUETAS -- #
 import os
 import json
+import re
 import shutil
 import threading
 from datetime import datetime
 
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+from PIL import Image
+import fitz  # PyMuPDF
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -18,6 +21,7 @@ from armadoEtiqueta import generar_etiquetas_desde_excel, previsualizar_etiqueta
 
 APP_VERSION = "1.0.0"
 ESTADO_PATH = os.path.join("data", "estado_app.json")
+LOTES_DIR = os.path.join("data", "lotes")
 
 # ---------- ESTILO VISUAL V&C ---------- #
 STYLE = {
@@ -46,7 +50,8 @@ FONT_SMALL = ("Segoe UI", 11)
 FONT_TINY = ("Segoe UI", 10)
 FONT_EMOJI = ("Segoe UI Emoji", 16)
 
-COLUMNAS_ETIQUETAS = [("EAN", 2), ("Marca", 2), ("Norma", 3), ("Estado", 2), ("", 2)]
+COLUMNAS_ETIQUETAS = [("EAN", 2), ("Marca", 2), ("Norma", 3), ("Estado", 2), ("", 1), ("", 2), ("", 1)]
+ETIQUETAS_POR_PAGINA = 50
 
 ctk.set_appearance_mode("light")
 
@@ -60,20 +65,91 @@ def _formato_tamano(num_bytes):
     return f"{tamano:.1f} GB"
 
 
-def _cargar_estado():
+_CARACTERES_NO_SEGUROS = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _slug(texto):
+    texto = _CARACTERES_NO_SEGUROS.sub("_", str(texto)).strip("_")
+    return texto or "lote"
+
+
+def _ruta_lote_unica(lote_id):
+    ruta = os.path.join(LOTES_DIR, f"{lote_id}.jsonl")
+    base, contador = lote_id, 1
+    while os.path.exists(ruta):
+        lote_id = f"{base}_{contador}"
+        ruta = os.path.join(LOTES_DIR, f"{lote_id}.jsonl")
+        contador += 1
+    return lote_id, ruta
+
+
+def _guardar_detalle_lote(detalle, lote_id):
+    """Guarda el detalle de un lote en su propio archivo .jsonl (una etiqueta
+    por línea) para no tener que cargar TODO el historial en memoria."""
+    os.makedirs(LOTES_DIR, exist_ok=True)
+    lote_id, ruta = _ruta_lote_unica(lote_id)
+    with open(ruta, "w", encoding="utf-8") as f:
+        for item in detalle:
+            f.write(json.dumps(item, ensure_ascii=False))
+            f.write("\n")
+    return lote_id, ruta
+
+
+def _migrar_lote_a_jsonl(lote):
+    """Convierte un lote del formato antiguo (detalle embebido) al nuevo
+    formato modular, escribiendo su detalle a un .jsonl aparte."""
+    detalle = lote.pop("detalle", [])
+    lote_id_base = f"{_slug(lote.get('nombre_excel', 'lote'))}_{_slug(lote.get('fecha', ''))}"
+    lote_id, ruta = _guardar_detalle_lote(detalle, lote_id_base)
+    lote["id"] = lote_id
+    lote["detalle_path"] = ruta
+    lote["total_detalle"] = len(detalle)
+    lote.setdefault("total_filas", len(detalle))
+    lote.setdefault("generadas", sum(1 for d in detalle if not d.get("error")))
+    return lote
+
+
+def _cargar_manifiesto_lotes():
+    """Carga solo los metadatos de cada lote (ligero); el detalle de cada uno
+    vive en su propio .jsonl y se lee bajo demanda, no aquí.
+
+    Formatos soportados: el nuevo ({"lotes": [...]} con detalle_path) y el
+    antiguo (detalle embebido, de versiones previas), migrando este último
+    automáticamente para no perder el historial ni seguir arrastrando el
+    archivo de estado pesado."""
     if not os.path.exists(ESTADO_PATH):
-        return None
+        return []
     try:
         with open(ESTADO_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except Exception:
-        return None
+        return []
+
+    if isinstance(data, dict) and "lotes" in data:
+        lotes = data.get("lotes") or []
+    elif isinstance(data, dict) and "detalle" in data:
+        lotes = [data]
+    else:
+        lotes = []
+
+    migrado = False
+    lotes_normalizados = []
+    for lote in lotes:
+        if "detalle" in lote:
+            lote = _migrar_lote_a_jsonl(lote)
+            migrado = True
+        lotes_normalizados.append(lote)
+
+    if migrado:
+        _guardar_manifiesto_lotes(lotes_normalizados)
+
+    return lotes_normalizados
 
 
-def _guardar_estado(estado):
+def _guardar_manifiesto_lotes(lotes):
     os.makedirs(os.path.dirname(ESTADO_PATH), exist_ok=True)
     with open(ESTADO_PATH, "w", encoding="utf-8") as f:
-        json.dump(estado, f, ensure_ascii=False, indent=2)
+        json.dump({"lotes": lotes}, f, ensure_ascii=False, indent=2)
 
 
 class GenerdorEtiquetas:
@@ -83,10 +159,18 @@ class GenerdorEtiquetas:
     def __init__(self):
         self.excel_path = None
         self.resultado_analisis = None
-        self.estado_lote = _cargar_estado()
+        self._json_generado_excel = None
+        self._json_generado_path = None
+        self.lotes = _cargar_manifiesto_lotes()
+        self.estado_lote = self.lotes[-1] if self.lotes else None
         self.estado_pasos = ["pendiente"] * 4
         self.dnd_activo = False
-        self.filas_etiquetas = []
+        self.etiquetas_filtradas = []
+        self.pagina_etiquetas_actual = 0
+        self.modo_busqueda_etiquetas = False
+        self._busqueda_after_id = None
+        self._indices_lote = {}
+        self._ventana_preview = None
 
         self.root = ctk.CTk()
         self.root.title("Generador de Etiquetas")
@@ -479,6 +563,8 @@ class GenerdorEtiquetas:
     def _cargar_archivo(self, ruta):
         self.excel_path = ruta
         self.resultado_analisis = None
+        self._json_generado_excel = None
+        self._json_generado_path = None
         self._render_dropzone_archivo(ruta)
         self.btn_generar.configure(state="disabled")
 
@@ -495,8 +581,17 @@ class GenerdorEtiquetas:
         hilo.start()
 
     def _quitar_archivo(self):
+        if self._json_generado_excel == self.excel_path and self._json_generado_path:
+            try:
+                if os.path.exists(self._json_generado_path):
+                    os.remove(self._json_generado_path)
+            except OSError:
+                pass
+
         self.excel_path = None
         self.resultado_analisis = None
+        self._json_generado_excel = None
+        self._json_generado_path = None
         self.estado_pasos = ["pendiente"] * 4
         self._actualizar_stepper()
         self.progress.set(0)
@@ -607,16 +702,28 @@ class GenerdorEtiquetas:
                 "; ".join(resultado["errores"][:3]) + extra
             )
 
+        nombre_excel = os.path.basename(self.excel_path)
+        lote_id_base = f"{_slug(nombre_excel)}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        lote_id, detalle_path = _guardar_detalle_lote(resultado["detalle"], lote_id_base)
+
         self.estado_lote = {
-            "nombre_excel": os.path.basename(self.excel_path),
+            "id": lote_id,
+            "nombre_excel": nombre_excel,
             "fecha": datetime.now().strftime("%d/%m/%Y · %H:%M"),
             "output_dir": resultado["output_dir"],
             "json_path": resultado["json_path"],
-            "detalle": resultado["detalle"],
+            "detalle_path": detalle_path,
+            "total_filas": resultado["total_filas"],
+            "generadas": resultado["generadas"],
+            "total_detalle": len(resultado["detalle"]),
         }
-        _guardar_estado(self.estado_lote)
+        self.lotes.append(self.estado_lote)
+        _guardar_manifiesto_lotes(self.lotes)
         self._refrescar_card_ultimo()
         self._mostrar_banner_resultado(True, resultado)
+
+        self._json_generado_excel = self.excel_path
+        self._json_generado_path = resultado["json_path"]
 
         try:
             os.startfile(resultado["output_dir"])
@@ -687,7 +794,28 @@ class GenerdorEtiquetas:
             ).grid(row=0, column=i, sticky="ew", padx=6, pady=(0, 6))
 
         self.lista_etiquetas_frame = ctk.CTkScrollableFrame(pagina, fg_color="transparent")
-        self.lista_etiquetas_frame.pack(fill="both", expand=True, padx=24, pady=(0, 24))
+        self.lista_etiquetas_frame.pack(fill="both", expand=True, padx=24, pady=(0, 6))
+
+        paginacion = ctk.CTkFrame(pagina, fg_color="transparent")
+        paginacion.pack(fill="x", padx=24, pady=(0, 20))
+        self.btn_pagina_anterior = ctk.CTkButton(
+            paginacion, text="◀  Anterior", font=FONT_SMALL, height=32, width=110,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=lambda: self._cambiar_pagina_etiquetas(-1)
+        )
+        self.btn_pagina_anterior.pack(side="left")
+        self.lbl_pagina_etiquetas = ctk.CTkLabel(
+            paginacion, text="", font=FONT_SMALL, text_color=STYLE["texto_secundario"]
+        )
+        self.lbl_pagina_etiquetas.pack(side="left", expand=True)
+        self.btn_pagina_siguiente = ctk.CTkButton(
+            paginacion, text="Siguiente  ▶", font=FONT_SMALL, height=32, width=110,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=lambda: self._cambiar_pagina_etiquetas(1)
+        )
+        self.btn_pagina_siguiente.pack(side="right")
 
         return pagina
 
@@ -696,13 +824,93 @@ class GenerdorEtiquetas:
         for i, (_, peso) in enumerate(COLUMNAS_ETIQUETAS):
             frame.grid_columnconfigure(i, weight=peso)
 
+    def _lotes_orden_visual(self):
+        """Lotes del más reciente al más antiguo (el más nuevo se ve primero)."""
+        return list(reversed(self.lotes))
+
+    def _total_etiquetas(self):
+        """Total de etiquetas en todo el historial, sin abrir ningún .jsonl
+        (usa el conteo que ya viene en el manifiesto liviano)."""
+        return sum(lote.get("total_detalle", 0) for lote in self.lotes)
+
+    def _indice_lote(self, ruta):
+        """Índice de offsets (byte de inicio de cada línea) de un .jsonl,
+        construido una sola vez por archivo y reutilizado durante la sesión."""
+        if ruta in self._indices_lote:
+            return self._indices_lote[ruta]
+        offsets = []
+        try:
+            with open(ruta, "rb") as f:
+                offset = f.tell()
+                for linea in f:
+                    if linea.strip():
+                        offsets.append(offset)
+                    offset = f.tell()
+        except FileNotFoundError:
+            offsets = []
+        self._indices_lote[ruta] = offsets
+        return offsets
+
+    @staticmethod
+    def _leer_lineas_lote(ruta, offsets, indices):
+        resultado = []
+        if not indices:
+            return resultado
+        try:
+            with open(ruta, "rb") as f:
+                for idx in indices:
+                    if 0 <= idx < len(offsets):
+                        f.seek(offsets[idx])
+                        linea = f.readline()
+                        if linea:
+                            resultado.append(json.loads(linea.decode("utf-8")))
+        except FileNotFoundError:
+            pass
+        return resultado
+
+    def _leer_pagina_historial(self, inicio, fin):
+        """Lee solo el rango [inicio, fin) del historial completo, tocando
+        únicamente los .jsonl de los lotes que caen dentro de ese rango."""
+        resultado = []
+        acumulado = 0
+        for lote in self._lotes_orden_visual():
+            total_lote = lote.get("total_detalle", 0)
+            lote_inicio, lote_fin = acumulado, acumulado + total_lote
+            acumulado = lote_fin
+
+            if lote_fin <= inicio or lote_inicio >= fin or not total_lote:
+                continue
+
+            ruta = lote.get("detalle_path")
+            if not ruta:
+                continue
+
+            local_inicio = max(0, inicio - lote_inicio)
+            local_fin = min(total_lote, fin - lote_inicio)
+
+            offsets = self._indice_lote(ruta)
+            items = self._leer_lineas_lote(ruta, offsets, range(local_inicio, local_fin))
+            for item in items:
+                item = dict(item)
+                item["_excel_origen"] = lote.get("nombre_excel")
+                item["_fecha_lote"] = lote.get("fecha")
+                item["_detalle_path"] = ruta
+                resultado.append(item)
+        return resultado
+
     def _refrescar_pagina_etiquetas(self):
-        self._limpiar_frame(self.lista_etiquetas_frame)
-        self.filas_etiquetas = []
         if hasattr(self, "entrada_busqueda"):
             self.entrada_busqueda.delete(0, "end")
+        if self._busqueda_after_id:
+            self.root.after_cancel(self._busqueda_after_id)
+            self._busqueda_after_id = None
 
-        if not self.estado_lote or not self.estado_lote.get("detalle"):
+        self.modo_busqueda_etiquetas = False
+        self.etiquetas_filtradas = []
+        self.pagina_etiquetas_actual = 0
+
+        if not self.lotes:
+            self._limpiar_frame(self.lista_etiquetas_frame)
             ctk.CTkLabel(
                 self.lista_etiquetas_frame, text="Aún no has generado ninguna etiqueta.",
                 font=FONT_LABEL, text_color=STYLE["texto_secundario"]
@@ -710,17 +918,62 @@ class GenerdorEtiquetas:
             self.lbl_subtitulo_etiquetas.configure(
                 text="Genera un lote de etiquetas para poder buscarlas aquí."
             )
+            self.lbl_pagina_etiquetas.configure(text="")
+            self.btn_pagina_anterior.configure(state="disabled")
+            self.btn_pagina_siguiente.configure(state="disabled")
             return
 
         self.lbl_subtitulo_etiquetas.configure(
             text="Busca por EAN o por norma y descarga el PDF de cada etiqueta."
         )
+        self._renderizar_pagina_etiquetas()
 
-        for item in self.estado_lote["detalle"]:
+    def _renderizar_pagina_etiquetas(self):
+        self._limpiar_frame(self.lista_etiquetas_frame)
+
+        if self.modo_busqueda_etiquetas:
+            total = len(self.etiquetas_filtradas)
+            mensaje_vacio = "No se encontraron etiquetas para tu búsqueda."
+        else:
+            total = self._total_etiquetas()
+            mensaje_vacio = "Aún no has generado ninguna etiqueta."
+
+        total_paginas = max(1, (total + ETIQUETAS_POR_PAGINA - 1) // ETIQUETAS_POR_PAGINA)
+        self.pagina_etiquetas_actual = max(0, min(self.pagina_etiquetas_actual, total_paginas - 1))
+
+        if total == 0:
+            ctk.CTkLabel(
+                self.lista_etiquetas_frame, text=mensaje_vacio,
+                font=FONT_LABEL, text_color=STYLE["texto_secundario"]
+            ).pack(pady=30)
+            self.lbl_pagina_etiquetas.configure(text="")
+            self.btn_pagina_anterior.configure(state="disabled")
+            self.btn_pagina_siguiente.configure(state="disabled")
+            return
+
+        inicio = self.pagina_etiquetas_actual * ETIQUETAS_POR_PAGINA
+        fin = min(inicio + ETIQUETAS_POR_PAGINA, total)
+
+        if self.modo_busqueda_etiquetas:
+            items_pagina = self.etiquetas_filtradas[inicio:fin]
+        else:
+            items_pagina = self._leer_pagina_historial(inicio, fin)
+
+        for item in items_pagina:
             fila = self._crear_fila_etiqueta(self.lista_etiquetas_frame, item)
-            self.filas_etiquetas.append((fila, item))
+            fila.pack(fill="x", pady=4)
 
-        self._filtrar_etiquetas()
+        self.lbl_pagina_etiquetas.configure(
+            text=f"Mostrando {inicio + 1}-{fin} de {total}  ·  Página {self.pagina_etiquetas_actual + 1} de {total_paginas}"
+        )
+        self.btn_pagina_anterior.configure(state="normal" if self.pagina_etiquetas_actual > 0 else "disabled")
+        self.btn_pagina_siguiente.configure(
+            state="normal" if self.pagina_etiquetas_actual < total_paginas - 1 else "disabled"
+        )
+
+    def _cambiar_pagina_etiquetas(self, delta):
+        self.pagina_etiquetas_actual += delta
+        self._renderizar_pagina_etiquetas()
 
     def _crear_fila_etiqueta(self, master, item):
         fila = ctk.CTkFrame(
@@ -754,6 +1007,17 @@ class GenerdorEtiquetas:
         ).grid(row=0, column=3, sticky="ew", padx=6)
 
         ctk.CTkButton(
+            fila, text="👁", width=34, height=30,
+            font=FONT_LABEL,
+            fg_color=STYLE["surface"] if tiene_pdf else STYLE["borde"],
+            hover_color=STYLE["surface_alt"] if tiene_pdf else STYLE["borde"],
+            text_color=STYLE["texto_oscuro"] if tiene_pdf else STYLE["texto_secundario"],
+            border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, state="normal" if tiene_pdf else "disabled",
+            command=(lambda ruta=ruta_pdf: self._previsualizar_pdf(ruta)) if tiene_pdf else None
+        ).grid(row=0, column=4, sticky="e", padx=(6, 0), pady=10)
+
+        ctk.CTkButton(
             fila, text="⬇ Descargar PDF" if tiene_pdf else "No disponible",
             font=FONT_TINY, height=30,
             fg_color=STYLE["secundario"] if tiene_pdf else STYLE["borde"],
@@ -761,9 +1025,161 @@ class GenerdorEtiquetas:
             text_color=STYLE["texto_claro"] if tiene_pdf else STYLE["texto_secundario"],
             corner_radius=6, state="normal" if tiene_pdf else "disabled",
             command=(lambda ruta=ruta_pdf: self._descargar_pdf(ruta)) if tiene_pdf else None
-        ).grid(row=0, column=4, sticky="e", padx=10, pady=10)
+        ).grid(row=0, column=5, sticky="e", padx=10, pady=10)
+
+        ctk.CTkButton(
+            fila, text="🗑", width=34, height=30, font=FONT_LABEL,
+            fg_color=STYLE["surface"], hover_color=STYLE["advertencia_suave"],
+            text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=lambda it=item: self._confirmar_eliminar_etiqueta(it)
+        ).grid(row=0, column=6, sticky="e", padx=(0, 10), pady=10)
 
         return fila
+
+    def _confirmar_eliminar_etiqueta(self, item):
+        descripcion = item.get("ean") or f"fila {item.get('fila')}"
+        norma = item.get("norma") or "—"
+        if not messagebox.askyesno(
+            "Eliminar etiqueta",
+            f"¿Eliminar la etiqueta {descripcion} ({norma})?\n\n"
+            "Esto también borrará su PDF si existe. Esta acción no se puede deshacer."
+        ):
+            return
+
+        if self._eliminar_etiqueta(item):
+            self._renderizar_pagina_etiquetas()
+        else:
+            messagebox.showerror(
+                "No se pudo eliminar",
+                "La etiqueta ya no se encontró en el historial (puede que haya cambiado mientras tanto)."
+            )
+
+    def _eliminar_etiqueta(self, item):
+        """Borra una etiqueta puntual: la quita de su .jsonl de lote y
+        elimina su PDF si existe. Si el lote se queda sin etiquetas, también
+        se elimina del historial."""
+        ruta = item.get("_detalle_path")
+        fila_numero = item.get("fila")
+        if not ruta:
+            return False
+
+        lote = next((l for l in self.lotes if l.get("detalle_path") == ruta), None)
+        if lote is None:
+            return False
+
+        lineas_restantes = []
+        eliminado = None
+        try:
+            with open(ruta, "r", encoding="utf-8") as f:
+                for linea in f:
+                    linea_limpia = linea.strip()
+                    if not linea_limpia:
+                        continue
+                    data = json.loads(linea_limpia)
+                    if eliminado is None and data.get("fila") == fila_numero:
+                        eliminado = data
+                        continue
+                    lineas_restantes.append(linea_limpia)
+        except FileNotFoundError:
+            return False
+
+        if eliminado is None:
+            return False
+
+        if lineas_restantes:
+            with open(ruta, "w", encoding="utf-8") as f:
+                for linea in lineas_restantes:
+                    f.write(linea)
+                    f.write("\n")
+            lote["total_detalle"] = len(lineas_restantes)
+            if not eliminado.get("error"):
+                lote["generadas"] = max(0, lote.get("generadas", 0) - 1)
+        else:
+            try:
+                os.remove(ruta)
+            except OSError:
+                pass
+            self.lotes.remove(lote)
+            if self.estado_lote is lote:
+                self.estado_lote = self.lotes[-1] if self.lotes else None
+
+        self._indices_lote.pop(ruta, None)
+        _guardar_manifiesto_lotes(self.lotes)
+        self._refrescar_card_ultimo()
+
+        ruta_pdf = eliminado.get("pdf_path")
+        if ruta_pdf and os.path.exists(ruta_pdf):
+            try:
+                os.remove(ruta_pdf)
+            except OSError:
+                pass
+
+        if self.modo_busqueda_etiquetas:
+            self.etiquetas_filtradas = [
+                f for f in self.etiquetas_filtradas
+                if not (f.get("_detalle_path") == ruta and f.get("fila") == fila_numero)
+            ]
+
+        return True
+
+    def _previsualizar_pdf(self, ruta_pdf):
+        if not ruta_pdf or not os.path.exists(ruta_pdf):
+            messagebox.showwarning(
+                "PDF no encontrado",
+                "El archivo PDF de esta etiqueta ya no existe en la carpeta original."
+            )
+            return
+
+        try:
+            doc = fitz.open(ruta_pdf)
+            pagina = doc.load_page(0)
+            pix = pagina.get_pixmap(dpi=200)
+            modo = "RGB" if pix.n < 4 else "RGBA"
+            imagen = Image.frombytes(modo, (pix.width, pix.height), pix.samples)
+            doc.close()
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir la vista previa:\n{e}")
+            return
+
+        max_w, max_h = 520, 640
+        escala = min(max_w / imagen.width, max_h / imagen.height, 1.0)
+        if escala < 1.0:
+            imagen = imagen.resize(
+                (max(1, int(imagen.width * escala)), max(1, int(imagen.height * escala))), Image.LANCZOS
+            )
+
+        if self._ventana_preview is not None and self._ventana_preview.winfo_exists():
+            self._ventana_preview.destroy()
+
+        ventana = ctk.CTkToplevel(self.root)
+        self._ventana_preview = ventana
+        ventana.title(f"Vista previa · {os.path.basename(ruta_pdf)}")
+        ventana.configure(fg_color=STYLE["fondo"])
+        ventana.resizable(False, False)
+        ventana.transient(self.root)
+
+        ctk_img = ctk.CTkImage(light_image=imagen, size=(imagen.width, imagen.height))
+        etiqueta_img = ctk.CTkLabel(ventana, image=ctk_img, text="")
+        etiqueta_img.image = ctk_img
+        etiqueta_img.pack(padx=20, pady=(20, 10))
+
+        botones = ctk.CTkFrame(ventana, fg_color="transparent")
+        botones.pack(fill="x", padx=20, pady=(0, 20))
+        ctk.CTkButton(
+            botones, text="⬇ Descargar PDF", font=FONT_SMALL, height=34,
+            fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+            text_color=STYLE["texto_claro"], corner_radius=6,
+            command=lambda: self._descargar_pdf(ruta_pdf)
+        ).pack(side="left")
+        ctk.CTkButton(
+            botones, text="Cerrar", font=FONT_SMALL, height=34,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=ventana.destroy
+        ).pack(side="right")
+
+        ventana.update_idletasks()
+        ventana.grab_set()
 
     def _descargar_pdf(self, ruta_origen):
         if not ruta_origen or not os.path.exists(ruta_origen):
@@ -787,17 +1203,70 @@ class GenerdorEtiquetas:
             messagebox.showerror("Error", str(e))
 
     def _filtrar_etiquetas(self):
-        consulta = self.entrada_busqueda.get().strip().upper()
-        for fila, _ in self.filas_etiquetas:
-            fila.pack_forget()
-        for fila, item in self.filas_etiquetas:
-            coincide = (
-                not consulta
-                or consulta in (item.get("ean") or "").upper()
-                or consulta in (item.get("norma") or "").upper()
-            )
-            if coincide:
-                fila.pack(fill="x", pady=4)
+        """Se dispara con cada tecla; espera una pausa breve (debounce) antes
+        de lanzar la búsqueda real para no escanear el historial en cada golpe
+        de tecla."""
+        if not self.lotes:
+            return
+        if self._busqueda_after_id:
+            self.root.after_cancel(self._busqueda_after_id)
+        consulta = self.entrada_busqueda.get().strip()
+        self._busqueda_after_id = self.root.after(350, lambda: self._ejecutar_busqueda(consulta))
+
+    def _ejecutar_busqueda(self, consulta):
+        self._busqueda_after_id = None
+
+        if not consulta:
+            self.modo_busqueda_etiquetas = False
+            self.etiquetas_filtradas = []
+            self.pagina_etiquetas_actual = 0
+            self._renderizar_pagina_etiquetas()
+            return
+
+        self.modo_busqueda_etiquetas = True
+        self._limpiar_frame(self.lista_etiquetas_frame)
+        ctk.CTkLabel(
+            self.lista_etiquetas_frame, text="Buscando…",
+            font=FONT_LABEL, text_color=STYLE["texto_secundario"]
+        ).pack(pady=30)
+        self.lbl_pagina_etiquetas.configure(text="")
+        self.btn_pagina_anterior.configure(state="disabled")
+        self.btn_pagina_siguiente.configure(state="disabled")
+
+        hilo = threading.Thread(target=self._buscar_en_hilo, args=(consulta,), daemon=True)
+        hilo.start()
+
+    def _buscar_en_hilo(self, consulta):
+        consulta_norm = consulta.upper()
+        resultado = []
+        for lote in self._lotes_orden_visual():
+            ruta = lote.get("detalle_path")
+            if not ruta or not os.path.exists(ruta):
+                continue
+            try:
+                with open(ruta, "r", encoding="utf-8") as f:
+                    for linea in f:
+                        linea = linea.strip()
+                        if not linea:
+                            continue
+                        item = json.loads(linea)
+                        if (consulta_norm in (item.get("ean") or "").upper()
+                                or consulta_norm in (item.get("norma") or "").upper()):
+                            item = dict(item)
+                            item["_excel_origen"] = lote.get("nombre_excel")
+                            item["_fecha_lote"] = lote.get("fecha")
+                            item["_detalle_path"] = ruta
+                            resultado.append(item)
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
+        self.root.after(0, self._busqueda_completada, consulta, resultado)
+
+    def _busqueda_completada(self, consulta, resultado):
+        if self.entrada_busqueda.get().strip() != consulta:
+            return  # el usuario ya escribió algo más; este resultado quedó obsoleto
+        self.etiquetas_filtradas = resultado
+        self.pagina_etiquetas_actual = 0
+        self._renderizar_pagina_etiquetas()
 
     # ---------------------------------------------------------------- #
     # Página: Información

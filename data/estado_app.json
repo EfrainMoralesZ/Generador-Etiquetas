@@ -1,0 +1,15 @@
+{
+  "lotes": [
+    {
+      "nombre_excel": "PRUEBA EFRA.xlsx",
+      "fecha": "30/07/2026 · 09:56",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_PRUEBA EFRA_20260730_094429",
+      "json_path": "data\\etiquetas\\PRUEBA EFRA.json",
+      "id": "PRUEBA_EFRA_xlsx_30_07_2026_09_56",
+      "detalle_path": "data\\lotes\\PRUEBA_EFRA_xlsx_30_07_2026_09_56.jsonl",
+      "total_detalle": 10711,
+      "total_filas": 10711,
+      "generadas": 10343
+    }
+  ]
+}
