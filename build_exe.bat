@@ -22,6 +22,7 @@ python -m PyInstaller ^
   --windowed ^
   --onefile ^
   --name GeneradorEtiquetas ^
+  --icon "img\icono.ico" ^
   --hidden-import openpyxl ^
   --hidden-import xlrd ^
   --hidden-import PIL._tkinter_finder ^
