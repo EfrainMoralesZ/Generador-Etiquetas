@@ -1,15 +1,4 @@
 {
   "lotes": [
-    {
-      "id": "PRUEBA_ETIQUETAS_NUEVA_xlsx_20260730162801",
-      "nombre_excel": "PRUEBA ETIQUETAS NUEVA.xlsx",
-      "fecha": "30/07/2026 · 16:28",
-      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_PRUEBA ETIQUETAS NUEVA_20260730_162801",
-      "json_path": "data\\etiquetas\\PRUEBA ETIQUETAS NUEVA.json",
-      "detalle_path": "data\\lotes\\PRUEBA_ETIQUETAS_NUEVA_xlsx_20260730162801.jsonl",
-      "total_filas": 5,
-      "generadas": 5,
-      "total_detalle": 5
-    }
   ]
 }
