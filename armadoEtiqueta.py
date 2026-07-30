@@ -50,6 +50,10 @@ def _cargar_fuente(tamano):
 
 _CARACTERES_INVALIDOS = re.compile(r'[<>:"/\\|?*]')
 
+# Unidades de peso/volumen que indican "contenido neto" (gramos, mililitros,
+# litros, kilos...) en vez de una cantidad de piezas.
+_UNIDADES_CONTENIDO_NETO = re.compile(r"\b(ML|MLS?|LTS?|L|KGS?|GRS?|G)\b", re.IGNORECASE)
+
 def _nombre_archivo_seguro(texto):
     texto = _CARACTERES_INVALIDOS.sub("_", str(texto).strip())
     return texto or "SIN_DATO"
@@ -88,6 +92,7 @@ def buscar_valor_columna(fila, campo):
             return valor
     return None
 
+#Reglas para anteponer titulos ej: HECHO EN... CONTENIDO, CONTENIDO NETO, FORRO, TALLA, PAIS ORIGEN.
 def formatear_valor(campo, valor):
     if valor is None:
         return None
@@ -100,11 +105,19 @@ def formatear_valor(campo, valor):
     if campo_norm in ("PAIS DE ORIGEN", "PAIS", "PAIS ORIGEN"):
         return f"HECHO EN {texto.upper()}"
     # ANTEPONER FORRO ANTES DEL TEXTO DE FORRO
-    if campo_norm in ("FORRO"):
-            return f"FORRO {texto.upper()}"
+    if campo_norm == "FORRO":
+        return f"FORRO {texto.upper()}"
     # ANTEPONER TALLA ANTES DEL TEXTO DE TALLA
     if campo_norm == "TALLA":
         return f"TALLA {texto}"
+    # ANTEPONER CONTENIDO (piezas) O CONTENIDO NETO (peso/volumen) SEGUN LA UNIDAD
+    if campo_norm == "CONTENIDO":
+        texto_mayus = texto.upper()
+        if texto_mayus.startswith("CONTENIDO"):
+            return texto_mayus
+        if _UNIDADES_CONTENIDO_NETO.search(texto_mayus):
+            return f"CONTENIDO NETO {texto}"
+        return f"CONTENIDO {texto}"
     return texto
 
 def extraer_campos_etiqueta(fila, campos):
@@ -424,4 +437,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    

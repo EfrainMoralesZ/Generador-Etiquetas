@@ -1,6 +1,6 @@
 {
     "NOM-004-SE-2021": {
-        "campos": ["EAN", "MARCA", "INSUMOS","CUIDADO", "PAIS ORIGEN", "IMPORTADOR", "TALLA"]
+        "campos": ["EAN", "MARCA", "INSUMOS", "FORRO", "CUIDADO", "PAIS ORIGEN", "IMPORTADOR", "TALLA"]
     },
     "NOM-015-SCFI-2007": {
         "campos": ["EAN", "MARCA", "LEYENDAS", "EDAD ", "PAIS ORIGEN", "IMPORTADOR"]
