@@ -164,6 +164,17 @@ def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
 
     return item
 
+def _filas_sin_codigo_formato(registros):
+    """Números de fila (1-based) donde falta un valor en la columna
+    'CODIGO FORMATO' (ya sea porque la columna no existe en el Excel o
+    porque esa celda está en blanco). Esa columna es la que le dice al
+    sistema qué norma y qué armado le corresponde a cada etiqueta, así que
+    si falta en cualquier fila no se debe generar nada hasta corregirla."""
+    return [
+        idx for idx, fila in enumerate(registros, start=1)
+        if not (buscar_valor_columna(fila, COLUMNA_NORMA) or "").strip()
+    ]
+
 def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_PATH, json_dir=DEFAULT_JSON_DIR):
     """Analiza el Excel y arma un resumen (fila, EAN, marca, norma, campos, error)
     sin generar imágenes ni PDFs, para que el usuario verifique antes de generar."""
@@ -190,6 +201,7 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
         "listas": sum(1 for d in detalle if not d["error"]),
         "detalle": detalle,
         "json_path": json_path,
+        "filas_sin_codigo_formato": _filas_sin_codigo_formato(registros),
     }
 
 def _envolver_campos(campos_texto, max_chars):
@@ -314,6 +326,16 @@ def generar_etiquetas_desde_excel(
 
     registros, json_path = excel_a_json(excel_path, json_dir)
     log(f"Excel convertido a JSON: {json_path}")
+
+    filas_sin_codigo_formato = _filas_sin_codigo_formato(registros)
+    if filas_sin_codigo_formato:
+        filas_txt = ", ".join(str(f) for f in filas_sin_codigo_formato[:15])
+        extra = "…" if len(filas_sin_codigo_formato) > 15 else ""
+        raise ValueError(
+            f"Falta la columna '{COLUMNA_NORMA}' en la(s) fila(s): {filas_txt}{extra}. "
+            "Esa columna es indispensable para saber qué norma y qué armado le corresponde a "
+            "cada etiqueta, así que hay que completarla en todas las filas antes de generar."
+        )
 
     os.makedirs(output_dir, exist_ok=True)
 

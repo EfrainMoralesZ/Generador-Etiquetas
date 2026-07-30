@@ -18,6 +18,7 @@ except Exception:
     TkinterDnD = None
 
 from armadoEtiqueta import generar_etiquetas_desde_excel, previsualizar_etiquetas_desde_excel
+import configuracion
 
 APP_VERSION = "1.0.0"
 ESTADO_PATH = os.path.join("data", "estado_app.json")
@@ -169,8 +170,14 @@ class GenerdorEtiquetas:
         self.pagina_etiquetas_actual = 0
         self.modo_busqueda_etiquetas = False
         self._busqueda_after_id = None
+        self._peticion_pagina_id = 0
         self._indices_lote = {}
         self._ventana_preview = None
+
+        self._normas_config = {}
+        self._norma_seleccionada = None
+        self._creando_norma = False
+        self._campos_editor = []
 
         self.root = ctk.CTk()
         self.root.title("Generador de Etiquetas")
@@ -199,7 +206,7 @@ class GenerdorEtiquetas:
 
         self.pagina_generador = self._crear_pagina_generador(self.contenedor_paginas)
         self.pagina_etiquetas = self._crear_pagina_etiquetas(self.contenedor_paginas)
-        self.pagina_info = self._crear_pagina_info(self.contenedor_paginas)
+        self.pagina_configuracion = self._crear_pagina_configuracion(self.contenedor_paginas)
 
         self._mostrar_pagina("generador")
 
@@ -225,7 +232,7 @@ class GenerdorEtiquetas:
         nav_items = [
             ("generador", "🏠", "Generador"),
             ("etiquetas", "🔎", "Etiquetas generadas"),
-            ("info", "ℹ️", "Información"),
+            ("config", "⚙️", "Configuración"),
         ]
         for clave, icono, texto in nav_items:
             btn = ctk.CTkButton(
@@ -309,7 +316,7 @@ class GenerdorEtiquetas:
         paginas = {
             "generador": self.pagina_generador,
             "etiquetas": self.pagina_etiquetas,
-            "info": self.pagina_info,
+            "config": self.pagina_configuracion,
         }
         for pagina in paginas.values():
             pagina.pack_forget()
@@ -320,6 +327,8 @@ class GenerdorEtiquetas:
 
         if clave == "etiquetas":
             self._refrescar_pagina_etiquetas()
+        elif clave == "config":
+            self._refrescar_pagina_configuracion()
 
     @staticmethod
     def _limpiar_frame(frame):
@@ -617,7 +626,24 @@ class GenerdorEtiquetas:
                 text=f"{resultado['listas']} de {resultado['total_filas']} filas listas"
             )
 
-        if resultado["listas"] > 0:
+        filas_sin_codigo = resultado.get("filas_sin_codigo_formato") or []
+        if filas_sin_codigo:
+            self.btn_generar.configure(state="disabled")
+            filas_txt = ", ".join(str(f) for f in filas_sin_codigo[:15])
+            extra = "…" if len(filas_sin_codigo) > 15 else ""
+            self._agregar_actividad(
+                "❌", "Falta la columna 'CODIGO FORMATO'",
+                f"Falta en {len(filas_sin_codigo)} fila(s): {filas_txt}{extra}"
+            )
+            messagebox.showerror(
+                "Falta la columna 'CODIGO FORMATO'",
+                f"Falta un valor en la columna 'CODIGO FORMATO' en {len(filas_sin_codigo)} "
+                f"fila(s): {filas_txt}{extra}\n\n"
+                "Esa columna es indispensable para saber qué norma y qué armado le corresponde "
+                "a cada etiqueta, así que hay que completarla en todas las filas antes de poder "
+                "generar el lote."
+            )
+        elif resultado["listas"] > 0:
             self.btn_generar.configure(state="normal")
             self._agregar_actividad(
                 "✅", "Datos analizados",
@@ -796,6 +822,11 @@ class GenerdorEtiquetas:
         self.lista_etiquetas_frame = ctk.CTkScrollableFrame(pagina, fg_color="transparent")
         self.lista_etiquetas_frame.pack(fill="both", expand=True, padx=24, pady=(0, 6))
 
+        self.lbl_mensaje_etiquetas = ctk.CTkLabel(
+            self.lista_etiquetas_frame, text="", font=FONT_LABEL, text_color=STYLE["texto_secundario"]
+        )
+        self._filas_pool_etiquetas = []
+
         paginacion = ctk.CTkFrame(pagina, fg_color="transparent")
         paginacion.pack(fill="x", padx=24, pady=(0, 20))
         self.btn_pagina_anterior = ctk.CTkButton(
@@ -898,6 +929,31 @@ class GenerdorEtiquetas:
                 resultado.append(item)
         return resultado
 
+    def _mostrar_mensaje_etiquetas(self, texto):
+        """Muestra un mensaje de estado (vacío / buscando / cargando) sin
+        tocar las filas ya construidas — solo las oculta."""
+        for widgets in self._filas_pool_etiquetas:
+            widgets["frame"].pack_forget()
+        self.lbl_mensaje_etiquetas.configure(text=texto)
+        self.lbl_mensaje_etiquetas.pack(pady=30)
+
+    def _mostrar_filas_etiquetas(self, items):
+        """Pinta la página actual reutilizando los widgets de fila ya creados
+        (en vez de destruir y recrear todo) para evitar el parpadeo/pixelado
+        al construir muchos botones de golpe."""
+        self.lbl_mensaje_etiquetas.pack_forget()
+        for i, item in enumerate(items):
+            if i < len(self._filas_pool_etiquetas):
+                widgets = self._filas_pool_etiquetas[i]
+            else:
+                widgets = self._crear_fila_etiqueta_widgets(self.lista_etiquetas_frame)
+                self._filas_pool_etiquetas.append(widgets)
+            self._actualizar_fila_etiqueta(widgets, item)
+            widgets["frame"].pack(fill="x", pady=4)
+
+        for widgets in self._filas_pool_etiquetas[len(items):]:
+            widgets["frame"].pack_forget()
+
     def _refrescar_pagina_etiquetas(self):
         if hasattr(self, "entrada_busqueda"):
             self.entrada_busqueda.delete(0, "end")
@@ -910,11 +966,7 @@ class GenerdorEtiquetas:
         self.pagina_etiquetas_actual = 0
 
         if not self.lotes:
-            self._limpiar_frame(self.lista_etiquetas_frame)
-            ctk.CTkLabel(
-                self.lista_etiquetas_frame, text="Aún no has generado ninguna etiqueta.",
-                font=FONT_LABEL, text_color=STYLE["texto_secundario"]
-            ).pack(pady=30)
+            self._mostrar_mensaje_etiquetas("Aún no has generado ninguna etiqueta.")
             self.lbl_subtitulo_etiquetas.configure(
                 text="Genera un lote de etiquetas para poder buscarlas aquí."
             )
@@ -929,8 +981,6 @@ class GenerdorEtiquetas:
         self._renderizar_pagina_etiquetas()
 
     def _renderizar_pagina_etiquetas(self):
-        self._limpiar_frame(self.lista_etiquetas_frame)
-
         if self.modo_busqueda_etiquetas:
             total = len(self.etiquetas_filtradas)
             mensaje_vacio = "No se encontraron etiquetas para tu búsqueda."
@@ -942,10 +992,7 @@ class GenerdorEtiquetas:
         self.pagina_etiquetas_actual = max(0, min(self.pagina_etiquetas_actual, total_paginas - 1))
 
         if total == 0:
-            ctk.CTkLabel(
-                self.lista_etiquetas_frame, text=mensaje_vacio,
-                font=FONT_LABEL, text_color=STYLE["texto_secundario"]
-            ).pack(pady=30)
+            self._mostrar_mensaje_etiquetas(mensaje_vacio)
             self.lbl_pagina_etiquetas.configure(text="")
             self.btn_pagina_anterior.configure(state="disabled")
             self.btn_pagina_siguiente.configure(state="disabled")
@@ -953,15 +1000,6 @@ class GenerdorEtiquetas:
 
         inicio = self.pagina_etiquetas_actual * ETIQUETAS_POR_PAGINA
         fin = min(inicio + ETIQUETAS_POR_PAGINA, total)
-
-        if self.modo_busqueda_etiquetas:
-            items_pagina = self.etiquetas_filtradas[inicio:fin]
-        else:
-            items_pagina = self._leer_pagina_historial(inicio, fin)
-
-        for item in items_pagina:
-            fila = self._crear_fila_etiqueta(self.lista_etiquetas_frame, item)
-            fila.pack(fill="x", pady=4)
 
         self.lbl_pagina_etiquetas.configure(
             text=f"Mostrando {inicio + 1}-{fin} de {total}  ·  Página {self.pagina_etiquetas_actual + 1} de {total_paginas}"
@@ -971,70 +1009,109 @@ class GenerdorEtiquetas:
             state="normal" if self.pagina_etiquetas_actual < total_paginas - 1 else "disabled"
         )
 
+        if self.modo_busqueda_etiquetas:
+            self._mostrar_filas_etiquetas(self.etiquetas_filtradas[inicio:fin])
+            return
+
+        # Modo historial: la lectura del .jsonl (y la primera indexación del
+        # archivo) puede tardar, así que se hace en un hilo aparte para que
+        # el cambio de página/pestaña no trabe la interfaz.
+        self._peticion_pagina_id += 1
+        peticion_id = self._peticion_pagina_id
+        self._mostrar_mensaje_etiquetas("Cargando…")
+        hilo = threading.Thread(
+            target=self._cargar_pagina_historial_en_hilo, args=(inicio, fin, peticion_id), daemon=True
+        )
+        hilo.start()
+
+    def _cargar_pagina_historial_en_hilo(self, inicio, fin, peticion_id):
+        items = self._leer_pagina_historial(inicio, fin)
+        self.root.after(0, self._pagina_historial_cargada, items, peticion_id)
+
+    def _pagina_historial_cargada(self, items, peticion_id):
+        if peticion_id != self._peticion_pagina_id:
+            return  # el usuario ya cambió de página mientras tanto; resultado obsoleto
+        self._mostrar_filas_etiquetas(items)
+
     def _cambiar_pagina_etiquetas(self, delta):
         self.pagina_etiquetas_actual += delta
         self._renderizar_pagina_etiquetas()
 
-    def _crear_fila_etiqueta(self, master, item):
+    def _crear_fila_etiqueta_widgets(self, master):
+        """Crea el esqueleto (vacío) de una fila una sola vez; el contenido
+        se rellena después con _actualizar_fila_etiqueta. Reutilizar estos
+        widgets entre páginas evita recrear ~7 widgets por fila cada vez
+        (que es lo que causaba el parpadeo/pixelado al cambiar de página)."""
         fila = ctk.CTkFrame(
             master, fg_color=STYLE["surface"], corner_radius=8,
             border_width=1, border_color=STYLE["borde"]
         )
         self._configurar_columnas(fila)
 
-        ctk.CTkLabel(
-            fila, text=item.get("ean") or "—", font=("Segoe UI", 12, "bold"),
-            text_color=STYLE["texto_oscuro"], anchor="w"
-        ).grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        ctk.CTkLabel(
-            fila, text=item.get("marca") or "—", font=FONT_SMALL,
-            text_color=STYLE["texto_oscuro"], anchor="w"
-        ).grid(row=0, column=1, sticky="ew", padx=6)
-        ctk.CTkLabel(
-            fila, text=item.get("norma") or "—", font=FONT_SMALL,
-            text_color=STYLE["texto_oscuro"], anchor="w"
-        ).grid(row=0, column=2, sticky="ew", padx=6)
+        lbl_ean = ctk.CTkLabel(
+            fila, text="", font=("Segoe UI", 12, "bold"), text_color=STYLE["texto_oscuro"], anchor="w"
+        )
+        lbl_ean.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        lbl_marca = ctk.CTkLabel(fila, text="", font=FONT_SMALL, text_color=STYLE["texto_oscuro"], anchor="w")
+        lbl_marca.grid(row=0, column=1, sticky="ew", padx=6)
+        lbl_norma = ctk.CTkLabel(fila, text="", font=FONT_SMALL, text_color=STYLE["texto_oscuro"], anchor="w")
+        lbl_norma.grid(row=0, column=2, sticky="ew", padx=6)
+        lbl_estado = ctk.CTkLabel(fila, text="", font=("Segoe UI", 11, "bold"), anchor="w")
+        lbl_estado.grid(row=0, column=3, sticky="ew", padx=6)
+
+        btn_preview = ctk.CTkButton(
+            fila, text="👁", width=34, height=30, font=FONT_LABEL,
+            border_width=1, border_color=STYLE["borde"], corner_radius=6
+        )
+        btn_preview.grid(row=0, column=4, sticky="e", padx=(6, 0), pady=10)
+
+        btn_descargar = ctk.CTkButton(fila, text="", font=FONT_TINY, height=30, corner_radius=6)
+        btn_descargar.grid(row=0, column=5, sticky="e", padx=10, pady=10)
+
+        btn_eliminar = ctk.CTkButton(
+            fila, text="🗑", width=34, height=30, font=FONT_LABEL,
+            fg_color=STYLE["surface"], hover_color=STYLE["advertencia_suave"],
+            text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6
+        )
+        btn_eliminar.grid(row=0, column=6, sticky="e", padx=(0, 10), pady=10)
+
+        return {
+            "frame": fila, "ean": lbl_ean, "marca": lbl_marca, "norma": lbl_norma,
+            "estado": lbl_estado, "preview": btn_preview, "descargar": btn_descargar,
+            "eliminar": btn_eliminar,
+        }
+
+    def _actualizar_fila_etiqueta(self, widgets, item):
+        widgets["ean"].configure(text=item.get("ean") or "—")
+        widgets["marca"].configure(text=item.get("marca") or "—")
+        widgets["norma"].configure(text=item.get("norma") or "—")
 
         hay_error = bool(item.get("error"))
         ruta_pdf = item.get("pdf_path")
         tiene_pdf = bool(ruta_pdf) and os.path.exists(ruta_pdf)
 
-        estado_texto = "OK" if not hay_error else "Con errores"
-        estado_color = STYLE["exito"] if not hay_error else STYLE["advertencia"]
-        ctk.CTkLabel(
-            fila, text=estado_texto, font=("Segoe UI", 11, "bold"),
-            text_color=estado_color, anchor="w"
-        ).grid(row=0, column=3, sticky="ew", padx=6)
+        widgets["estado"].configure(
+            text="OK" if not hay_error else "Con errores",
+            text_color=STYLE["exito"] if not hay_error else STYLE["advertencia"]
+        )
 
-        ctk.CTkButton(
-            fila, text="👁", width=34, height=30,
-            font=FONT_LABEL,
+        widgets["preview"].configure(
             fg_color=STYLE["surface"] if tiene_pdf else STYLE["borde"],
             hover_color=STYLE["surface_alt"] if tiene_pdf else STYLE["borde"],
             text_color=STYLE["texto_oscuro"] if tiene_pdf else STYLE["texto_secundario"],
-            border_width=1, border_color=STYLE["borde"],
-            corner_radius=6, state="normal" if tiene_pdf else "disabled",
+            state="normal" if tiene_pdf else "disabled",
             command=(lambda ruta=ruta_pdf: self._previsualizar_pdf(ruta)) if tiene_pdf else None
-        ).grid(row=0, column=4, sticky="e", padx=(6, 0), pady=10)
-
-        ctk.CTkButton(
-            fila, text="⬇ Descargar PDF" if tiene_pdf else "No disponible",
-            font=FONT_TINY, height=30,
+        )
+        widgets["descargar"].configure(
+            text="⬇ Descargar PDF" if tiene_pdf else "No disponible",
             fg_color=STYLE["secundario"] if tiene_pdf else STYLE["borde"],
             hover_color=STYLE["secundario_hover"] if tiene_pdf else STYLE["borde"],
             text_color=STYLE["texto_claro"] if tiene_pdf else STYLE["texto_secundario"],
-            corner_radius=6, state="normal" if tiene_pdf else "disabled",
+            state="normal" if tiene_pdf else "disabled",
             command=(lambda ruta=ruta_pdf: self._descargar_pdf(ruta)) if tiene_pdf else None
-        ).grid(row=0, column=5, sticky="e", padx=10, pady=10)
-
-        ctk.CTkButton(
-            fila, text="🗑", width=34, height=30, font=FONT_LABEL,
-            fg_color=STYLE["surface"], hover_color=STYLE["advertencia_suave"],
-            text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
-            corner_radius=6, command=lambda it=item: self._confirmar_eliminar_etiqueta(it)
-        ).grid(row=0, column=6, sticky="e", padx=(0, 10), pady=10)
-
-        return fila
+        )
+        widgets["eliminar"].configure(command=lambda it=item: self._confirmar_eliminar_etiqueta(it))
 
     def _confirmar_eliminar_etiqueta(self, item):
         descripcion = item.get("ean") or f"fila {item.get('fila')}"
@@ -1224,11 +1301,7 @@ class GenerdorEtiquetas:
             return
 
         self.modo_busqueda_etiquetas = True
-        self._limpiar_frame(self.lista_etiquetas_frame)
-        ctk.CTkLabel(
-            self.lista_etiquetas_frame, text="Buscando…",
-            font=FONT_LABEL, text_color=STYLE["texto_secundario"]
-        ).pack(pady=30)
+        self._mostrar_mensaje_etiquetas("Buscando…")
         self.lbl_pagina_etiquetas.configure(text="")
         self.btn_pagina_anterior.configure(state="disabled")
         self.btn_pagina_siguiente.configure(state="disabled")
@@ -1269,35 +1342,257 @@ class GenerdorEtiquetas:
         self._renderizar_pagina_etiquetas()
 
     # ---------------------------------------------------------------- #
-    # Página: Información
+    # Página: Configuración de normas
     # ---------------------------------------------------------------- #
-    def _crear_pagina_info(self, master):
+    def _crear_pagina_configuracion(self, master):
         pagina = ctk.CTkFrame(master, fg_color=STYLE["fondo"], corner_radius=0)
-        contenedor = ctk.CTkFrame(
-            pagina, fg_color=STYLE["surface"], corner_radius=14,
+
+        header = ctk.CTkFrame(pagina, fg_color="transparent")
+        header.pack(fill="x", padx=30, pady=(26, 10))
+        ctk.CTkLabel(
+            header, text="⚙️  Configuración de normas", font=FONT_TITLE, text_color=STYLE["texto_oscuro"]
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            header, text="Administra los campos que lleva cada norma al generar las etiquetas.",
+            font=FONT_LABEL, text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w", pady=(4, 0))
+
+        cuerpo = ctk.CTkFrame(pagina, fg_color="transparent")
+        cuerpo.pack(fill="both", expand=True, padx=30, pady=(10, 24))
+        cuerpo.grid_columnconfigure(0, weight=2)
+        cuerpo.grid_columnconfigure(1, weight=3)
+        cuerpo.grid_rowconfigure(0, weight=1)
+
+        lista_card = ctk.CTkFrame(
+            cuerpo, fg_color=STYLE["surface"], corner_radius=14,
             border_width=1, border_color=STYLE["borde"]
         )
-        contenedor.pack(fill="x", padx=30, pady=30)
+        lista_card.grid(row=0, column=0, sticky="nsew", padx=(0, 20))
 
+        lista_header = ctk.CTkFrame(lista_card, fg_color="transparent")
+        lista_header.pack(fill="x", padx=16, pady=(16, 8))
         ctk.CTkLabel(
-            contenedor, text="ℹ️  Información", font=FONT_TITLE, text_color=STYLE["texto_oscuro"]
-        ).pack(anchor="w", padx=24, pady=(24, 8))
+            lista_header, text="Normas configuradas", font=FONT_SUBTITLE, text_color=STYLE["texto_oscuro"]
+        ).pack(side="left")
+        ctk.CTkButton(
+            lista_header, text="+ Nueva", font=FONT_TINY, height=28, width=80,
+            fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
+            text_color=STYLE["texto_oscuro"], corner_radius=6,
+            command=self._iniciar_nueva_norma
+        ).pack(side="right")
 
-        texto = (
-            "Generador de Etiquetas convierte un archivo Excel en etiquetas PDF conforme a las "
-            "Normas Oficiales Mexicanas (NOM) configuradas en data/config_etiquetas.json.\n\n"
-            "1. Sube o arrastra tu archivo Excel en la pestaña 'Generador'.\n"
-            "2. El sistema valida cada fila y detecta la norma según la columna 'CODIGO FORMATO'.\n"
-            "3. Al generar, se crea un PDF individual por cada etiqueta.\n"
-            "4. En 'Etiquetas generadas' puedes buscar por EAN o norma y descargar el PDF de "
-            "cualquier etiqueta de forma individual."
+        self.lista_normas_frame = ctk.CTkScrollableFrame(lista_card, fg_color="transparent")
+        self.lista_normas_frame.pack(fill="both", expand=True, padx=10, pady=(0, 12))
+
+        self.editor_norma_card = ctk.CTkFrame(
+            cuerpo, fg_color=STYLE["surface"], corner_radius=14,
+            border_width=1, border_color=STYLE["borde"]
         )
-        ctk.CTkLabel(
-            contenedor, text=texto, font=FONT_LABEL, text_color=STYLE["texto_secundario"],
-            justify="left", anchor="w", wraplength=640
-        ).pack(fill="x", padx=24, pady=(0, 24))
+        self.editor_norma_card.grid(row=0, column=1, sticky="nsew")
 
         return pagina
+
+    def _refrescar_pagina_configuracion(self):
+        self._normas_config = configuracion.cargar_config()
+        self._norma_seleccionada = None
+        self._creando_norma = False
+        self._campos_editor = []
+        self._refrescar_lista_normas()
+        self._refrescar_editor_norma()
+
+    def _refrescar_lista_normas(self):
+        self._limpiar_frame(self.lista_normas_frame)
+        normas = configuracion.listar_normas(self._normas_config)
+
+        if not normas:
+            ctk.CTkLabel(
+                self.lista_normas_frame, text="No hay normas configuradas todavía.",
+                font=FONT_SMALL, text_color=STYLE["texto_secundario"],
+                wraplength=200, justify="left"
+            ).pack(pady=20, padx=10)
+            return
+
+        for nombre in normas:
+            campos = configuracion.obtener_campos(self._normas_config, nombre)
+            seleccionada = nombre == self._norma_seleccionada
+            ctk.CTkButton(
+                self.lista_normas_frame, text=f"{nombre}\n{len(campos)} campo(s)",
+                anchor="w", font=FONT_SMALL, height=48, corner_radius=8,
+                fg_color=STYLE["surface_alt"] if seleccionada else "transparent",
+                hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
+                command=lambda n=nombre: self._seleccionar_norma(n)
+            ).pack(fill="x", pady=3)
+
+    def _seleccionar_norma(self, nombre):
+        self._norma_seleccionada = nombre
+        self._creando_norma = False
+        self._campos_editor = configuracion.obtener_campos(self._normas_config, nombre)
+        self._refrescar_lista_normas()
+        self._refrescar_editor_norma()
+
+    def _iniciar_nueva_norma(self):
+        self._norma_seleccionada = None
+        self._creando_norma = True
+        self._campos_editor = []
+        self._refrescar_lista_normas()
+        self._refrescar_editor_norma()
+
+    def _refrescar_editor_norma(self):
+        self._limpiar_frame(self.editor_norma_card)
+
+        if not self._creando_norma and not self._norma_seleccionada:
+            ctk.CTkLabel(
+                self.editor_norma_card,
+                text="Selecciona una norma de la lista para editar sus campos,\n"
+                     "o crea una nueva con \"+ Nueva\".",
+                font=FONT_LABEL, text_color=STYLE["texto_secundario"], justify="left"
+            ).pack(padx=20, pady=40)
+            return
+
+        contenido = ctk.CTkFrame(self.editor_norma_card, fg_color="transparent")
+        contenido.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            contenido, text="Nombre de la norma", font=FONT_SMALL, text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w")
+        if self._creando_norma:
+            self.entrada_nombre_norma = ctk.CTkEntry(
+                contenido, placeholder_text="Ej. NOM-004-SE-2021", font=FONT_LABEL, height=36
+            )
+            self.entrada_nombre_norma.pack(fill="x", pady=(4, 16))
+        else:
+            ctk.CTkLabel(
+                contenido, text=self._norma_seleccionada, font=("Segoe UI", 15, "bold"),
+                text_color=STYLE["texto_oscuro"], anchor="w"
+            ).pack(fill="x", pady=(4, 16))
+
+        ctk.CTkLabel(
+            contenido, text="Campos que lleva esta etiqueta", font=FONT_SMALL,
+            text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w")
+
+        self.lista_campos_frame = ctk.CTkFrame(contenido, fg_color="transparent")
+        self.lista_campos_frame.pack(fill="x", pady=(6, 10))
+        self._renderizar_campos_editor()
+
+        agregar_fila = ctk.CTkFrame(contenido, fg_color="transparent")
+        agregar_fila.pack(fill="x", pady=(0, 20))
+        self.entrada_nuevo_campo = ctk.CTkEntry(
+            agregar_fila, placeholder_text="Nombre del campo (ej. TALLA)", font=FONT_LABEL, height=34
+        )
+        self.entrada_nuevo_campo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entrada_nuevo_campo.bind("<Return>", lambda e: self._agregar_campo_editor())
+        ctk.CTkButton(
+            agregar_fila, text="+ Agregar campo", font=FONT_SMALL, height=34, width=140,
+            fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+            text_color=STYLE["texto_claro"], corner_radius=6,
+            command=self._agregar_campo_editor
+        ).pack(side="right")
+
+        botones = ctk.CTkFrame(contenido, fg_color="transparent")
+        botones.pack(fill="x")
+        ctk.CTkButton(
+            botones, text="💾  Guardar cambios", font=FONT_SUBTITLE, height=42,
+            fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
+            text_color=STYLE["texto_oscuro"], corner_radius=10,
+            command=self._guardar_norma_editor
+        ).pack(side="left")
+
+        if self._creando_norma:
+            ctk.CTkButton(
+                botones, text="Cancelar", font=FONT_SMALL, height=42, width=110,
+                fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+                text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+                corner_radius=8, command=self._refrescar_pagina_configuracion
+            ).pack(side="left", padx=(10, 0))
+        else:
+            ctk.CTkButton(
+                botones, text="🗑  Eliminar norma", font=FONT_SMALL, height=42,
+                fg_color=STYLE["surface"], hover_color=STYLE["advertencia_suave"],
+                text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
+                corner_radius=8, command=self._eliminar_norma_editor
+            ).pack(side="right")
+
+    def _renderizar_campos_editor(self):
+        self._limpiar_frame(self.lista_campos_frame)
+        if not self._campos_editor:
+            ctk.CTkLabel(
+                self.lista_campos_frame, text="Esta norma todavía no tiene campos.",
+                font=FONT_TINY, text_color=STYLE["texto_secundario"]
+            ).pack(anchor="w", pady=4)
+            return
+
+        for campo in self._campos_editor:
+            fila = ctk.CTkFrame(self.lista_campos_frame, fg_color=STYLE["fondo"], corner_radius=6)
+            fila.pack(fill="x", pady=2)
+            ctk.CTkLabel(
+                fila, text=campo, font=FONT_SMALL, text_color=STYLE["texto_oscuro"], anchor="w"
+            ).pack(side="left", padx=10, pady=6)
+            ctk.CTkButton(
+                fila, text="✕", width=26, height=26, font=FONT_TINY,
+                fg_color="transparent", hover_color=STYLE["advertencia_suave"],
+                text_color=STYLE["texto_secundario"], corner_radius=6,
+                command=lambda c=campo: self._quitar_campo_editor(c)
+            ).pack(side="right", padx=6, pady=4)
+
+    def _agregar_campo_editor(self):
+        campo = self.entrada_nuevo_campo.get().strip().upper()
+        if not campo:
+            return
+        if campo in self._campos_editor:
+            messagebox.showwarning("Campo repetido", f"El campo '{campo}' ya está en la lista.")
+            return
+        self._campos_editor.append(campo)
+        self.entrada_nuevo_campo.delete(0, "end")
+        self._renderizar_campos_editor()
+
+    def _quitar_campo_editor(self, campo):
+        if campo in self._campos_editor:
+            self._campos_editor.remove(campo)
+        self._renderizar_campos_editor()
+
+    def _guardar_norma_editor(self):
+        if self._creando_norma:
+            nombre = self.entrada_nombre_norma.get().strip()
+            error = configuracion.validar_nombre_norma(nombre, self._normas_config)
+            if error:
+                messagebox.showerror("Nombre inválido", error)
+                return
+            if not self._campos_editor:
+                messagebox.showwarning("Sin campos", "Agrega al menos un campo antes de guardar.")
+                return
+            configuracion.agregar_norma(self._normas_config, nombre, self._campos_editor)
+            norma_guardada = nombre
+        else:
+            if not self._campos_editor:
+                messagebox.showwarning("Sin campos", "Una norma debe tener al menos un campo.")
+                return
+            configuracion.actualizar_campos_norma(
+                self._normas_config, self._norma_seleccionada, self._campos_editor
+            )
+            norma_guardada = self._norma_seleccionada
+
+        configuracion.guardar_config(self._normas_config)
+        messagebox.showinfo("Guardado", f"La norma '{norma_guardada}' se guardó correctamente.")
+
+        self._norma_seleccionada = norma_guardada
+        self._creando_norma = False
+        self._refrescar_lista_normas()
+        self._refrescar_editor_norma()
+
+    def _eliminar_norma_editor(self):
+        if not self._norma_seleccionada:
+            return
+        if not messagebox.askyesno(
+            "Eliminar norma",
+            f"¿Eliminar la norma '{self._norma_seleccionada}'?\n\n"
+            "Las etiquetas ya generadas con esta norma no se ven afectadas, pero ya no "
+            "podrás generar nuevas etiquetas con ella hasta que la vuelvas a crear."
+        ):
+            return
+        configuracion.eliminar_norma(self._normas_config, self._norma_seleccionada)
+        configuracion.guardar_config(self._normas_config)
+        self._refrescar_pagina_configuracion()
 
 
 if __name__ == "__main__":
