@@ -96,8 +96,13 @@ def formatear_valor(campo, valor):
         return None
 
     campo_norm = campo.strip().upper()
+    # ANTEPONER HECHO EN ANTES DEL PAIS ORIGEN
     if campo_norm in ("PAIS DE ORIGEN", "PAIS", "PAIS ORIGEN"):
         return f"HECHO EN {texto.upper()}"
+    # ANTEPONER FORRO ANTES DEL TEXTO DE FORRO
+    if campo_norm in ("FORRO"):
+            return f"FORRO {texto.upper()}"
+    # ANTEPONER TALLA ANTES DEL TEXTO DE TALLA
     if campo_norm == "TALLA":
         return f"TALLA {texto}"
     return texto
@@ -113,6 +118,11 @@ def extraer_campos_etiqueta(fila, campos):
     return resultado
 
 def excel_a_json(excel_path, carpeta_salida=DEFAULT_JSON_DIR):
+    """Lee el Excel y lo guarda de inmediato como .json en `carpeta_salida`
+    (se necesita ahí desde la subida, no solo tras generar, para poder
+    inspeccionar cómo queda extraído el texto). Si el usuario nunca genera
+    las etiquetas con este archivo, la app se encarga de borrar ese .json
+    (ver app._cargar_archivo / _quitar_archivo)."""
     df = pd.read_excel(excel_path, dtype=str)
     df = df.fillna("")
     registros = df.to_dict(orient="records")

@@ -160,8 +160,8 @@ class GenerdorEtiquetas:
     def __init__(self):
         self.excel_path = None
         self.resultado_analisis = None
-        self._json_generado_excel = None
-        self._json_generado_path = None
+        self._json_path_actual = None
+        self._archivo_generado = False
         self.lotes = _cargar_manifiesto_lotes()
         self.estado_lote = self.lotes[-1] if self.lotes else None
         self.estado_pasos = ["pendiente"] * 4
@@ -569,11 +569,25 @@ class GenerdorEtiquetas:
                 return
         messagebox.showwarning("Archivo no válido", "Arrastra un archivo Excel (.xlsx o .xls).")
 
+    def _limpiar_json_abandonado(self):
+        """Si el archivo cargado hasta ahora nunca llegó a generarse, borra
+        el .json que se guardó en data/etiquetas al analizarlo (se guarda
+        desde la subida para poder inspeccionarlo, pero no debe quedar
+        huérfano si el usuario nunca le da a 'Generar Etiquetas')."""
+        if self._json_path_actual and not self._archivo_generado:
+            try:
+                if os.path.exists(self._json_path_actual):
+                    os.remove(self._json_path_actual)
+            except OSError:
+                pass
+        self._json_path_actual = None
+        self._archivo_generado = False
+
     def _cargar_archivo(self, ruta):
+        self._limpiar_json_abandonado()
+
         self.excel_path = ruta
         self.resultado_analisis = None
-        self._json_generado_excel = None
-        self._json_generado_path = None
         self._render_dropzone_archivo(ruta)
         self.btn_generar.configure(state="disabled")
 
@@ -590,17 +604,10 @@ class GenerdorEtiquetas:
         hilo.start()
 
     def _quitar_archivo(self):
-        if self._json_generado_excel == self.excel_path and self._json_generado_path:
-            try:
-                if os.path.exists(self._json_generado_path):
-                    os.remove(self._json_generado_path)
-            except OSError:
-                pass
+        self._limpiar_json_abandonado()
 
         self.excel_path = None
         self.resultado_analisis = None
-        self._json_generado_excel = None
-        self._json_generado_path = None
         self.estado_pasos = ["pendiente"] * 4
         self._actualizar_stepper()
         self.progress.set(0)
@@ -618,6 +625,8 @@ class GenerdorEtiquetas:
 
     def _analisis_completado(self, resultado):
         self.resultado_analisis = resultado
+        self._json_path_actual = resultado.get("json_path")
+        self._archivo_generado = False
         self.estado_pasos[1] = "completado"
         self._actualizar_stepper()
 
@@ -709,6 +718,7 @@ class GenerdorEtiquetas:
             self.root.after(0, self._generacion_fallida, str(e))
 
     def _generacion_completada(self, resultado):
+        self._archivo_generado = True
         self.estado_pasos[2] = "completado"
         self.estado_pasos[3] = "completado"
         self._actualizar_stepper()
@@ -747,9 +757,6 @@ class GenerdorEtiquetas:
         _guardar_manifiesto_lotes(self.lotes)
         self._refrescar_card_ultimo()
         self._mostrar_banner_resultado(True, resultado)
-
-        self._json_generado_excel = self.excel_path
-        self._json_generado_path = resultado["json_path"]
 
         try:
             os.startfile(resultado["output_dir"])
