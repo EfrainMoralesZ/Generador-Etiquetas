@@ -178,6 +178,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = False
         self._campos_editor = []
+        self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
 
         self.root = ctk.CTk()
         self.root.title("Generador de Etiquetas")
@@ -596,6 +597,7 @@ class GenerdorEtiquetas:
         self.progress.set(0)
         self.lbl_progreso.configure(text="")
         self._limpiar_frame(self.banner_resultado)
+        self._limpiar_frame(self.actividad_scroll)
 
         self._agregar_actividad("📥", "Archivo cargado", os.path.basename(ruta))
         self._agregar_actividad("🔍", "Analizando datos", "Validando información y aplicando reglas")
@@ -1404,6 +1406,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = False
         self._campos_editor = []
+        self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
 
@@ -1434,6 +1437,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = nombre
         self._creando_norma = False
         self._campos_editor = configuracion.obtener_campos(self._normas_config, nombre)
+        self._orientacion_editor = configuracion.obtener_orientacion(self._normas_config, nombre)
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
 
@@ -1441,6 +1445,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = True
         self._campos_editor = []
+        self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
 
@@ -1474,30 +1479,27 @@ class GenerdorEtiquetas:
             ).pack(fill="x", pady=(4, 16))
 
         ctk.CTkLabel(
-            contenido, text="Campos que lleva esta etiqueta", font=FONT_SMALL,
+            contenido, text="Orientación de impresión", font=FONT_SMALL,
             text_color=STYLE["texto_secundario"]
         ).pack(anchor="w")
-
-        self.lista_campos_frame = ctk.CTkFrame(contenido, fg_color="transparent")
-        self.lista_campos_frame.pack(fill="x", pady=(6, 10))
-        self._renderizar_campos_editor()
-
-        agregar_fila = ctk.CTkFrame(contenido, fg_color="transparent")
-        agregar_fila.pack(fill="x", pady=(0, 20))
-        self.entrada_nuevo_campo = ctk.CTkEntry(
-            agregar_fila, placeholder_text="Nombre del campo (ej. TALLA)", font=FONT_LABEL, height=34
+        self.segmented_orientacion = ctk.CTkSegmentedButton(
+            contenido, values=["Vertical", "Horizontal"],
+            font=FONT_LABEL, height=34,
+            fg_color=STYLE["fondo"], selected_color=STYLE["primario"],
+            selected_hover_color=STYLE["primario_hover"], unselected_color=STYLE["fondo"],
+            unselected_hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
+            command=self._cambiar_orientacion_editor
         )
-        self.entrada_nuevo_campo.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self.entrada_nuevo_campo.bind("<Return>", lambda e: self._agregar_campo_editor())
-        ctk.CTkButton(
-            agregar_fila, text="+ Agregar campo", font=FONT_SMALL, height=34, width=140,
-            fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
-            text_color=STYLE["texto_claro"], corner_radius=6,
-            command=self._agregar_campo_editor
-        ).pack(side="right")
+        self.segmented_orientacion.set(
+            "Horizontal" if self._orientacion_editor == "horizontal" else "Vertical"
+        )
+        self.segmented_orientacion.pack(fill="x", pady=(4, 16))
 
+        # Botones y fila de "agregar campo" se anclan abajo (side="bottom")
+        # para que sigan visibles aunque la lista de campos tenga muchas
+        # filas; la lista de campos, en medio, es la que scrollea.
         botones = ctk.CTkFrame(contenido, fg_color="transparent")
-        botones.pack(fill="x")
+        botones.pack(side="bottom", fill="x")
         ctk.CTkButton(
             botones, text="💾  Guardar cambios", font=FONT_SUBTITLE, height=42,
             fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
@@ -1519,6 +1521,29 @@ class GenerdorEtiquetas:
                 text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
                 corner_radius=8, command=self._eliminar_norma_editor
             ).pack(side="right")
+
+        agregar_fila = ctk.CTkFrame(contenido, fg_color="transparent")
+        agregar_fila.pack(side="bottom", fill="x", pady=(0, 20))
+        self.entrada_nuevo_campo = ctk.CTkEntry(
+            agregar_fila, placeholder_text="Nombre del campo (ej. TALLA)", font=FONT_LABEL, height=34
+        )
+        self.entrada_nuevo_campo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entrada_nuevo_campo.bind("<Return>", lambda e: self._agregar_campo_editor())
+        ctk.CTkButton(
+            agregar_fila, text="+ Agregar campo", font=FONT_SMALL, height=34, width=140,
+            fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+            text_color=STYLE["texto_claro"], corner_radius=6,
+            command=self._agregar_campo_editor
+        ).pack(side="right")
+
+        ctk.CTkLabel(
+            contenido, text="Campos que lleva esta etiqueta", font=FONT_SMALL,
+            text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w")
+
+        self.lista_campos_frame = ctk.CTkScrollableFrame(contenido, fg_color="transparent")
+        self.lista_campos_frame.pack(fill="both", expand=True, pady=(6, 10))
+        self._renderizar_campos_editor()
 
     def _renderizar_campos_editor(self):
         self._limpiar_frame(self.lista_campos_frame)
@@ -1558,6 +1583,9 @@ class GenerdorEtiquetas:
             self._campos_editor.remove(campo)
         self._renderizar_campos_editor()
 
+    def _cambiar_orientacion_editor(self, valor):
+        self._orientacion_editor = "horizontal" if valor == "Horizontal" else "vertical"
+
     def _guardar_norma_editor(self):
         if self._creando_norma:
             nombre = self.entrada_nombre_norma.get().strip()
@@ -1568,7 +1596,9 @@ class GenerdorEtiquetas:
             if not self._campos_editor:
                 messagebox.showwarning("Sin campos", "Agrega al menos un campo antes de guardar.")
                 return
-            configuracion.agregar_norma(self._normas_config, nombre, self._campos_editor)
+            configuracion.agregar_norma(
+                self._normas_config, nombre, self._campos_editor, self._orientacion_editor
+            )
             norma_guardada = nombre
         else:
             if not self._campos_editor:
@@ -1576,6 +1606,9 @@ class GenerdorEtiquetas:
                 return
             configuracion.actualizar_campos_norma(
                 self._normas_config, self._norma_seleccionada, self._campos_editor
+            )
+            configuracion.actualizar_orientacion_norma(
+                self._normas_config, self._norma_seleccionada, self._orientacion_editor
             )
             norma_guardada = self._norma_seleccionada
 

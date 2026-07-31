@@ -106,7 +106,7 @@ def formatear_valor(campo, valor):
         return f"HECHO EN {texto.upper()}"
     # ANTEPONER FORRO ANTES DEL TEXTO DE FORRO
     if campo_norm == "FORRO":
-        return f"FORRO {texto.upper()}"
+        return f"FORRO {texto}"
     # ANTEPONER TALLA ANTES DEL TEXTO DE TALLA
     if campo_norm == "TALLA":
         return f"TALLA {texto}"
@@ -164,6 +164,7 @@ def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
         "codigo_formato": str(codigo_formato).strip() if codigo_formato else "",
         "norma": None,
         "campos_texto": [],
+        "orientacion": "vertical",
         "error": None,
     }
 
@@ -182,6 +183,7 @@ def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
 
     item["norma"] = norma
     item["campos_texto"] = campos_texto
+    item["orientacion"] = config[norma].get("orientacion", "vertical")
     if not campos_texto:
         item["error"] = f"Sin datos para los campos de la norma {norma}"
 
@@ -230,8 +232,12 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
 def _envolver_campos(campos_texto, max_chars):
     return [textwrap.wrap(texto, width=max_chars) or [texto] for _, texto in campos_texto]
 
-def crear_imagen_etiqueta(campos_texto):
-    """Genera la imagen de la etiqueta ajustando ancho y alto al contenido."""
+def crear_imagen_etiqueta(campos_texto, orientacion="vertical"):
+    """Genera la imagen de la etiqueta ajustando ancho y alto al contenido.
+
+    El contenido siempre se arma apilado (igual que en vertical); si la norma
+    pide "horizontal" la imagen final se rota 90°, ya que ese formato es para
+    material que se alimenta apaisado en la impresora de etiquetas."""
     if not campos_texto:
         raise ValueError("No hay campos con datos para generar la etiqueta")
 
@@ -309,6 +315,11 @@ def crear_imagen_etiqueta(campos_texto):
 
     ancho_cm = ancho / DPI * 2.54
     alto_cm = alto / DPI * 2.54
+
+    if orientacion == "horizontal":
+        img = img.transpose(Image.ROTATE_90)
+        ancho_cm, alto_cm = alto_cm, ancho_cm
+
     return img, ancho_cm, alto_cm
 
 def guardar_etiqueta_pdf(imagen, ancho_cm, alto_cm, output_dir, nombre_base, nombres_usados):
@@ -322,6 +333,7 @@ def guardar_etiqueta_pdf(imagen, ancho_cm, alto_cm, output_dir, nombre_base, nom
     nombres_usados[nombre] = contador + 1
     nombre_final = nombre if contador == 0 else f"{nombre}_{contador + 1}"
 
+    os.makedirs(output_dir, exist_ok=True)
     ruta_salida = os.path.join(output_dir, f"{nombre_final}.pdf")
 
     ancho_pt = ancho_cm * cm
@@ -385,7 +397,7 @@ def generar_etiquetas_desde_excel(
             continue
 
         try:
-            img, ancho_cm, alto_cm = crear_imagen_etiqueta(item["campos_texto"])
+            img, ancho_cm, alto_cm = crear_imagen_etiqueta(item["campos_texto"], item["orientacion"])
         except Exception as e:
             mensaje = f"error generando la etiqueta ({e})"
             errores.append(f"Fila {idx}: {mensaje}")
@@ -395,9 +407,10 @@ def generar_etiquetas_desde_excel(
 
         ean = item["ean"] or f"FILA{idx}"
         nombre_base = f"{ean}_{item['norma']}"
+        carpeta_norma = os.path.join(output_dir, _nombre_archivo_seguro(item["norma"]))
 
         try:
-            ruta_salida = guardar_etiqueta_pdf(img, ancho_cm, alto_cm, output_dir, nombre_base, nombres_usados)
+            ruta_salida = guardar_etiqueta_pdf(img, ancho_cm, alto_cm, carpeta_norma, nombre_base, nombres_usados)
         except Exception as e:
             mensaje = f"error guardando la etiqueta ({e})"
             errores.append(f"Fila {idx}: {mensaje}")

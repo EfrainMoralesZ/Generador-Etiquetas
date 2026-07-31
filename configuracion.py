@@ -11,6 +11,9 @@ CONFIG_PATH = os.path.join("data", "config_etiquetas.json")
 # va a poder emparejar con la columna "CODIGO FORMATO".
 _PATRON_NUMERO_NORMA = re.compile(r"NOM-(\d+)", re.IGNORECASE)
 
+ORIENTACION_DEFECTO = "vertical"
+ORIENTACIONES_VALIDAS = ("vertical", "horizontal")
+
 
 def cargar_config(config_path=CONFIG_PATH):
     if not os.path.exists(config_path):
@@ -31,6 +34,10 @@ def listar_normas(config):
 
 def obtener_campos(config, norma):
     return list(config.get(norma, {}).get("campos", []))
+
+
+def obtener_orientacion(config, norma):
+    return config.get(norma, {}).get("orientacion", ORIENTACION_DEFECTO)
 
 
 def validar_nombre_norma(nombre, config=None, excluir=None):
@@ -64,11 +71,13 @@ def validar_nombre_norma(nombre, config=None, excluir=None):
     return None
 
 
-def agregar_norma(config, nombre, campos=None):
+def agregar_norma(config, nombre, campos=None, orientacion=ORIENTACION_DEFECTO):
     error = validar_nombre_norma(nombre, config)
     if error:
         raise ValueError(error)
-    config[nombre] = {"campos": list(campos or [])}
+    if orientacion not in ORIENTACIONES_VALIDAS:
+        orientacion = ORIENTACION_DEFECTO
+    config[nombre] = {"campos": list(campos or []), "orientacion": orientacion}
     return config
 
 
@@ -81,6 +90,15 @@ def actualizar_campos_norma(config, nombre, campos):
     if nombre not in config:
         raise KeyError(f"La norma '{nombre}' no existe.")
     config[nombre]["campos"] = list(campos)
+    return config
+
+
+def actualizar_orientacion_norma(config, nombre, orientacion):
+    if nombre not in config:
+        raise KeyError(f"La norma '{nombre}' no existe.")
+    if orientacion not in ORIENTACIONES_VALIDAS:
+        raise ValueError(f"Orientación inválida: '{orientacion}'.")
+    config[nombre]["orientacion"] = orientacion
     return config
 
 
