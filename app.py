@@ -51,7 +51,7 @@ FONT_SMALL = ("Segoe UI", 11)
 FONT_TINY = ("Segoe UI", 10)
 FONT_EMOJI = ("Segoe UI Emoji", 16)
 
-COLUMNAS_ETIQUETAS = [("EAN", 2), ("Marca", 2), ("Norma", 3), ("Estado", 2), ("", 1), ("", 2), ("", 1)]
+COLUMNAS_ETIQUETAS = [("EAN", 2), ("Marca", 2), ("Norma", 3), ("Estado", 2), ("", 1), ("", 2), ("", 2), ("", 1)]
 ETIQUETAS_POR_PAGINA = 50
 
 ctk.set_appearance_mode("light")
@@ -155,7 +155,7 @@ def _guardar_manifiesto_lotes(lotes):
 
 class GenerdorEtiquetas:
 
-    PASOS = ["Archivo cargado", "Analizando datos", "Generando PDF", "Finalizado"]
+    PASOS = ["Archivo cargado", "Analizando datos", "Generando PDF y Word", "Finalizado"]
 
     def __init__(self):
         self.excel_path = None
@@ -385,7 +385,7 @@ class GenerdorEtiquetas:
         )
         self.btn_generar.pack(fill="x")
         ctk.CTkLabel(
-            centro, text="Se generará un archivo PDF por cada etiqueta detectada.",
+            centro, text="Se generará un archivo PDF y uno de Word (.docx) por cada etiqueta detectada.",
             font=FONT_TINY, text_color=STYLE["texto_secundario"]
         ).pack(anchor="w", pady=(6, 0))
 
@@ -695,7 +695,7 @@ class GenerdorEtiquetas:
         total = self.resultado_analisis["total_filas"] or 1
         self._contador_generadas = 0
 
-        self._agregar_actividad("🖨️", "Generando PDF", "Creando etiquetas… esto puede tardar unos segundos")
+        self._agregar_actividad("🖨️", "Generando PDF y Word", "Creando etiquetas… esto puede tardar unos segundos")
 
         def on_log(mensaje):
             if mensaje.startswith("Fila "):
@@ -729,7 +729,7 @@ class GenerdorEtiquetas:
         self.btn_generar.configure(state="normal")
 
         self._agregar_actividad(
-            "📦", "PDF generado",
+            "📦", "PDF y Word generados",
             f"{resultado['generadas']} de {resultado['total_filas']} etiquetas generadas"
         )
 
@@ -806,7 +806,7 @@ class GenerdorEtiquetas:
             header, text="🔎  Etiquetas generadas", font=FONT_TITLE, text_color=STYLE["texto_oscuro"]
         ).pack(anchor="w")
         self.lbl_subtitulo_etiquetas = ctk.CTkLabel(
-            header, text="Busca por EAN o por norma y descarga el PDF de cada etiqueta.",
+            header, text="Busca por EAN o por norma y descarga el PDF o Word de cada etiqueta.",
             font=FONT_LABEL, text_color=STYLE["texto_secundario"]
         )
         self.lbl_subtitulo_etiquetas.pack(anchor="w", pady=(4, 0))
@@ -985,7 +985,7 @@ class GenerdorEtiquetas:
             return
 
         self.lbl_subtitulo_etiquetas.configure(
-            text="Busca por EAN o por norma y descarga el PDF de cada etiqueta."
+            text="Busca por EAN o por norma y descarga el PDF o Word de cada etiqueta."
         )
         self._renderizar_pagina_etiquetas()
 
@@ -1075,7 +1075,10 @@ class GenerdorEtiquetas:
         btn_preview.grid(row=0, column=4, sticky="e", padx=(6, 0), pady=10)
 
         btn_descargar = ctk.CTkButton(fila, text="", font=FONT_TINY, height=30, corner_radius=6)
-        btn_descargar.grid(row=0, column=5, sticky="e", padx=10, pady=10)
+        btn_descargar.grid(row=0, column=5, sticky="e", padx=(10, 0), pady=10)
+
+        btn_descargar_word = ctk.CTkButton(fila, text="", font=FONT_TINY, height=30, corner_radius=6)
+        btn_descargar_word.grid(row=0, column=6, sticky="e", padx=10, pady=10)
 
         btn_eliminar = ctk.CTkButton(
             fila, text="🗑", width=34, height=30, font=FONT_LABEL,
@@ -1083,12 +1086,12 @@ class GenerdorEtiquetas:
             text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
             corner_radius=6
         )
-        btn_eliminar.grid(row=0, column=6, sticky="e", padx=(0, 10), pady=10)
+        btn_eliminar.grid(row=0, column=7, sticky="e", padx=(0, 10), pady=10)
 
         return {
             "frame": fila, "ean": lbl_ean, "marca": lbl_marca, "norma": lbl_norma,
             "estado": lbl_estado, "preview": btn_preview, "descargar": btn_descargar,
-            "eliminar": btn_eliminar,
+            "descargar_word": btn_descargar_word, "eliminar": btn_eliminar,
         }
 
     def _actualizar_fila_etiqueta(self, widgets, item):
@@ -1099,6 +1102,8 @@ class GenerdorEtiquetas:
         hay_error = bool(item.get("error"))
         ruta_pdf = item.get("pdf_path")
         tiene_pdf = bool(ruta_pdf) and os.path.exists(ruta_pdf)
+        ruta_docx = item.get("docx_path")
+        tiene_docx = bool(ruta_docx) and os.path.exists(ruta_docx)
 
         widgets["estado"].configure(
             text="OK" if not hay_error else "Con errores",
@@ -1110,7 +1115,7 @@ class GenerdorEtiquetas:
             hover_color=STYLE["surface_alt"] if tiene_pdf else STYLE["borde"],
             text_color=STYLE["texto_oscuro"] if tiene_pdf else STYLE["texto_secundario"],
             state="normal" if tiene_pdf else "disabled",
-            command=(lambda ruta=ruta_pdf: self._previsualizar_pdf(ruta)) if tiene_pdf else None
+            command=(lambda ruta=ruta_pdf, docx=ruta_docx: self._previsualizar_pdf(ruta, docx)) if tiene_pdf else None
         )
         widgets["descargar"].configure(
             text="⬇ Descargar PDF" if tiene_pdf else "No disponible",
@@ -1120,6 +1125,14 @@ class GenerdorEtiquetas:
             state="normal" if tiene_pdf else "disabled",
             command=(lambda ruta=ruta_pdf: self._descargar_pdf(ruta)) if tiene_pdf else None
         )
+        widgets["descargar_word"].configure(
+            text="⬇ Descargar Word" if tiene_docx else "Sin Word",
+            fg_color=STYLE["secundario"] if tiene_docx else STYLE["borde"],
+            hover_color=STYLE["secundario_hover"] if tiene_docx else STYLE["borde"],
+            text_color=STYLE["texto_claro"] if tiene_docx else STYLE["texto_secundario"],
+            state="normal" if tiene_docx else "disabled",
+            command=(lambda ruta=ruta_docx: self._descargar_word(ruta)) if tiene_docx else None
+        )
         widgets["eliminar"].configure(command=lambda it=item: self._confirmar_eliminar_etiqueta(it))
 
     def _confirmar_eliminar_etiqueta(self, item):
@@ -1128,7 +1141,7 @@ class GenerdorEtiquetas:
         if not messagebox.askyesno(
             "Eliminar etiqueta",
             f"¿Eliminar la etiqueta {descripcion} ({norma})?\n\n"
-            "Esto también borrará su PDF si existe. Esta acción no se puede deshacer."
+            "Esto también borrará su PDF y su Word si existen. Esta acción no se puede deshacer."
         ):
             return
 
@@ -1142,7 +1155,7 @@ class GenerdorEtiquetas:
 
     def _eliminar_etiqueta(self, item):
         """Borra una etiqueta puntual: la quita de su .jsonl de lote y
-        elimina su PDF si existe. Si el lote se queda sin etiquetas, también
+        elimina su PDF y su Word si existen. Si el lote se queda sin etiquetas, también
         se elimina del historial."""
         ruta = item.get("_detalle_path")
         fila_numero = item.get("fila")
@@ -1193,12 +1206,13 @@ class GenerdorEtiquetas:
         _guardar_manifiesto_lotes(self.lotes)
         self._refrescar_card_ultimo()
 
-        ruta_pdf = eliminado.get("pdf_path")
-        if ruta_pdf and os.path.exists(ruta_pdf):
-            try:
-                os.remove(ruta_pdf)
-            except OSError:
-                pass
+        for clave in ("pdf_path", "docx_path"):
+            ruta_archivo = eliminado.get(clave)
+            if ruta_archivo and os.path.exists(ruta_archivo):
+                try:
+                    os.remove(ruta_archivo)
+                except OSError:
+                    pass
 
         if self.modo_busqueda_etiquetas:
             self.etiquetas_filtradas = [
@@ -1208,7 +1222,7 @@ class GenerdorEtiquetas:
 
         return True
 
-    def _previsualizar_pdf(self, ruta_pdf):
+    def _previsualizar_pdf(self, ruta_pdf, ruta_docx=None):
         if not ruta_pdf or not os.path.exists(ruta_pdf):
             messagebox.showwarning(
                 "PDF no encontrado",
@@ -1257,6 +1271,13 @@ class GenerdorEtiquetas:
             text_color=STYLE["texto_claro"], corner_radius=6,
             command=lambda: self._descargar_pdf(ruta_pdf)
         ).pack(side="left")
+        if ruta_docx and os.path.exists(ruta_docx):
+            ctk.CTkButton(
+                botones, text="⬇ Descargar Word", font=FONT_SMALL, height=34,
+                fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+                text_color=STYLE["texto_claro"], corner_radius=6,
+                command=lambda: self._descargar_word(ruta_docx)
+            ).pack(side="left", padx=(8, 0))
         ctk.CTkButton(
             botones, text="Cerrar", font=FONT_SMALL, height=34,
             fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
@@ -1268,17 +1289,23 @@ class GenerdorEtiquetas:
         ventana.grab_set()
 
     def _descargar_pdf(self, ruta_origen):
+        self._descargar_archivo(ruta_origen, "PDF", ".pdf", ("Archivo PDF", "*.pdf"))
+
+    def _descargar_word(self, ruta_origen):
+        self._descargar_archivo(ruta_origen, "Word", ".docx", ("Documento de Word", "*.docx"))
+
+    def _descargar_archivo(self, ruta_origen, tipo, extension, filtro):
         if not ruta_origen or not os.path.exists(ruta_origen):
             messagebox.showwarning(
-                "PDF no encontrado",
-                "El archivo PDF de esta etiqueta ya no existe en la carpeta original."
+                f"{tipo} no encontrado",
+                f"El archivo {tipo} de esta etiqueta ya no existe en la carpeta original."
             )
             return
         destino = filedialog.asksaveasfilename(
             title="Guardar etiqueta como",
             initialfile=os.path.basename(ruta_origen),
-            defaultextension=".pdf",
-            filetypes=[("Archivo PDF", "*.pdf")]
+            defaultextension=extension,
+            filetypes=[filtro]
         )
         if not destino:
             return

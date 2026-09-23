@@ -2,15 +2,15 @@
 
 ## 1. Descripción general
 
-**Generador de Etiquetas** es una aplicación de escritorio para Windows (Python + customtkinter) que convierte un archivo Excel de productos en un lote de etiquetas PDF individuales, conforme a las Normas Oficiales Mexicanas (NOM) configuradas en el sistema.
+**Generador de Etiquetas** es una aplicación de escritorio para Windows (Python + customtkinter) que convierte un archivo Excel de productos en un lote de etiquetas individuales en PDF (con texto seleccionable/copiable) y en Word (.docx), conforme a las Normas Oficiales Mexicanas (NOM) configuradas en el sistema.
 
-Flujo en una frase: **subes un Excel → el sistema detecta la norma de cada fila por la columna `CODIGO FORMATO` → genera un PDF por etiqueta → el lote queda en un historial buscable y editable.**
+Flujo en una frase: **subes un Excel → el sistema detecta la norma de cada fila por la columna `CODIGO FORMATO` → genera un PDF y un Word por etiqueta → el lote queda en un historial buscable y editable.**
 
 La app tiene tres secciones:
 
 | Sección | Para qué sirve |
 |---|---|
-| **Generador** | Subir el Excel, revisar el análisis y disparar la generación de PDFs |
+| **Generador** | Subir el Excel, revisar el análisis y disparar la generación de PDFs y Word |
 | **Etiquetas generadas** | Buscar, previsualizar, descargar o borrar cualquier etiqueta de cualquier lote generado (histórico completo, no solo el último) |
 | **Configuración** | Dar de alta nuevas normas o editar qué campos lleva cada una, sin tocar código |
 
@@ -23,8 +23,8 @@ La app tiene tres secciones:
 | Interfaz | `customtkinter` sobre Tkinter | Ventana, widgets, temas |
 | Drag & drop | `tkinterdnd2` (opcional) | Arrastrar el Excel al dropzone; si no está disponible, la app cae a solo selector de archivo |
 | Lectura de Excel | `pandas` + `openpyxl` (.xlsx) / `xlrd` (.xls) | Convertir cada fila del Excel a un `dict` |
-| Render de imagen de etiqueta | `Pillow` (`PIL.Image`, `ImageDraw`, `ImageFont`) | Dibuja el contenido de la etiqueta como imagen antes de convertirla a PDF |
-| Generación de PDF | `reportlab` | Empaqueta la imagen en un PDF del tamaño exacto de la etiqueta |
+| Generación de PDF | `reportlab` | Escribe la etiqueta como texto real (Arial Bold incrustada) en un PDF del tamaño exacto de la etiqueta, para que el texto se pueda seleccionar, copiar y pegar |
+| Generación de Word | `python-docx` | Crea un `.docx` del mismo tamaño y acomodo (tabla de una celda con borde) para editar la etiqueta |
 | Vista previa de PDF | `PyMuPDF` (`fitz`) | Renderiza la primera página de un PDF ya generado como imagen, para el botón 👁 |
 | Empaquetado a `.exe` | `PyInstaller` | Ver [`build_exe.bat`](#9-empaquetado-build_exebat) |
 
@@ -37,7 +37,7 @@ Todas las versiones exactas están fijadas en [`requierements`](#10-dependencias
 ```
 Generador Etiquetas/
 ├── app.py                  # Interfaz gráfica completa (una sola clase, una sola ventana)
-├── armadoEtiqueta.py        # Lógica de negocio: Excel → validación → imagen → PDF
+├── armadoEtiqueta.py        # Lógica de negocio: Excel → validación → layout → PDF + Word
 ├── configuracion.py         # CRUD de normas sobre data/config_etiquetas.json
 ├── build_exe.bat            # Script de empaquetado a ejecutable de Windows
 ├── requierements             # Dependencias pip (congeladas por versión)
@@ -166,10 +166,13 @@ Sin dependencia de Tkinter; se podría usar desde una CLI (de hecho tiene un `ma
 | `_filas_sin_codigo_formato(registros)` | Lista de números de fila (1-based) sin valor en `CODIGO FORMATO` |
 | `previsualizar_etiquetas_desde_excel(excel_path, ...)` | Analiza sin generar PDFs; devuelve resumen + `filas_sin_codigo_formato` para la UI |
 | `crear_imagen_etiqueta(campos_texto)` | Dibuja la etiqueta como imagen PIL, con ancho/alto dinámicos según el contenido (mínimo 700×380 px @ 300 DPI) |
-| `guardar_etiqueta_pdf(imagen, ancho_cm, alto_cm, output_dir, nombre_base, nombres_usados)` | Convierte la imagen a PDF del tamaño exacto de la etiqueta; `nombres_usados` evita que dos etiquetas con el mismo nombre se sobreescriban (les agrega sufijo `_2`, `_3`, …) |
-| `generar_etiquetas_desde_excel(excel_path, output_dir, ...)` | Orquesta todo: valida, genera un PDF por fila válida, devuelve el `detalle` completo del lote |
+| `calcular_layout_etiqueta(campos_texto)` | Calcula bloques, líneas, tamaños de fuente y medidas (en puntos) de la etiqueta; lo comparten PDF y Word |
+| `guardar_etiqueta_pdf(layout, orientacion, ruta_salida)` | Escribe el PDF con texto real (seleccionable/copiable) del tamaño exacto de la etiqueta |
+| `guardar_etiqueta_docx(layout, orientacion, ruta_salida)` | Escribe el `.docx` con el mismo tamaño, borde y acomodo; en horizontal gira el texto de la celda |
+| `_ruta_salida_unica(output_dir, nombre_base, nombres_usados)` | Devuelve la ruta base (sin extensión); `nombres_usados` evita que dos etiquetas con el mismo nombre se sobreescriban (les agrega sufijo `_2`, `_3`, …) |
+| `generar_etiquetas_desde_excel(excel_path, output_dir, ...)` | Orquesta todo: valida, genera un PDF y un Word por fila válida, devuelve el `detalle` completo del lote |
 
-**Layout de la etiqueta** (`crear_imagen_etiqueta`): los campos se agrupan en tres bloques verticales — encabezado (`EAN`, luego `MARCA`, centrados y en fuente grande), cuerpo (el resto de los campos de la norma) y pie (`IMPORTADOR` y `TALLA`, si existen). El texto largo se envuelve con `textwrap` (32 caracteres en encabezado, 38 en cuerpo/pie). El tamaño final de la imagen —y por lo tanto del PDF— se calcula sumando las alturas de cada bloque más márgenes fijos, así que **cada etiqueta tiene un tamaño de PDF distinto** según cuánto texto lleve.
+**Layout de la etiqueta** (`calcular_layout_etiqueta`): los campos se agrupan en tres bloques verticales — encabezado (`EAN`, luego `MARCA`, centrados y en fuente grande), cuerpo (el resto de los campos de la norma) y pie (`IMPORTADOR` y `TALLA`, si existen). El texto largo se envuelve con `textwrap` (32 caracteres en encabezado, 38 en cuerpo/pie). El tamaño final de la etiqueta —y por lo tanto del PDF y del Word— se calcula sumando las alturas de cada bloque más márgenes fijos, así que **cada etiqueta tiene un tamaño de página distinto** según cuánto texto lleve.
 
 ### 6.2 `app.py` — interfaz gráfica
 
@@ -178,7 +181,7 @@ Una sola clase, `GenerdorEtiquetas`, que construye la ventana en `__init__` y en
 #### Página Generador
 `_crear_pagina_generador`, `_render_dropzone_*`, `_construir_stepper`, `_cargar_archivo`, `_analizar_en_hilo` / `_analisis_completado`, `generar_pdf`, `_generar_en_hilo` / `_generacion_completada`.
 
-Stepper de 4 pasos (`Archivo cargado → Analizando datos → Generando PDF → Finalizado`), zona de "Actividad reciente" que va acumulando entradas con `_agregar_actividad`, y un banner final de éxito/error.
+Stepper de 4 pasos (`Archivo cargado → Analizando datos → Generando PDF y Word → Finalizado`), zona de "Actividad reciente" que va acumulando entradas con `_agregar_actividad`, y un banner final de éxito/error.
 
 #### Página Etiquetas generadas
 La más compleja de la app, con tres optimizaciones deliberadas (detalladas en la [sección 8](#8-rendimiento-y-decisiones-de-diseño)):
@@ -189,7 +192,7 @@ La más compleja de la app, con tres optimizaciones deliberadas (detalladas en l
 
 Búsqueda por EAN o norma con *debounce* de 350&nbsp;ms (`_filtrar_etiquetas` → `_ejecutar_busqueda` → hilo `_buscar_en_hilo` → `_busqueda_completada`), que escanea todos los `.jsonl` línea por línea (no hay índice de texto — es una búsqueda lineal, aceptable porque corre en segundo plano y no bloquea la interfaz).
 
-Cada fila tiene tres acciones: 👁 vista previa (`_previsualizar_pdf`, renderiza la primera página del PDF con PyMuPDF), ⬇ descargar (`_descargar_pdf`, copia el PDF a donde el usuario elija) y 🗑 eliminar (`_confirmar_eliminar_etiqueta` → `_eliminar_etiqueta`, que reescribe el `.jsonl` sin esa línea, borra el PDF, y si el lote se queda en cero etiquetas lo retira por completo del historial).
+Cada fila tiene cuatro acciones: 👁 vista previa (`_previsualizar_pdf`, renderiza la primera página del PDF con PyMuPDF), ⬇ descargar (`_descargar_pdf`, copia el PDF a donde el usuario elija), ⬇ descargar Word (`_descargar_word`, igual con el `.docx`) y 🗑 eliminar (`_confirmar_eliminar_etiqueta` → `_eliminar_etiqueta`, que reescribe el `.jsonl` sin esa línea, borra el PDF y el Word, y si el lote se queda en cero etiquetas lo retira por completo del historial).
 
 #### Página Configuración
 `_crear_pagina_configuracion` + `_refrescar_lista_normas` / `_refrescar_editor_norma`. Panel izquierdo con la lista de normas (clic para seleccionar), panel derecho como editor: agregar/quitar campos (`_agregar_campo_editor` / `_quitar_campo_editor`), crear norma nueva (`_iniciar_nueva_norma`), guardar (`_guardar_norma_editor`, delega la validación y persistencia a `configuracion.py`) o eliminar (`_eliminar_norma_editor`, con confirmación).
@@ -237,9 +240,9 @@ Los **demás** tipos de error de fila (código que no coincide con ninguna norma
 
 > **Nota técnica:** la condición para `FORRO` está escrita como `if campo_norm in ("FORRO"):`. Al faltarle la coma final, Python no interpreta `("FORRO")` como una tupla de un elemento sino como el string `"FORRO"` plano, así que `in` hace **verificación de substring**, no de igualdad — el bloque se dispara para cualquier `campo_norm` que sea substring de `"FORRO"` (`"FOR"`, `"ORRO"`, `"R"`, etc.), no solo para el campo exactamente llamado `FORRO`. En la práctica no suele causar problemas porque los nombres de campo de las normas configuradas no chocan con substrings de "FORRO", pero conviene tenerlo presente si se agrega algún campo con un nombre corto parecido. La forma correcta sería `campo_norm == "FORRO"` o `campo_norm in ("FORRO",)`.
 
-### 7.3 Nomenclatura y de-duplicación de archivos PDF
+### 7.3 Nomenclatura y de-duplicación de archivos PDF / Word
 
-Cada PDF se nombra `<EAN>_<NORMA>.pdf` (o `FILA<n>_<NORMA>.pdf` si la fila no trae EAN). Si dos filas del mismo lote producen el mismo nombre, `guardar_etiqueta_pdf` les agrega un sufijo incremental (`_2`, `_3`, …) usando el diccionario compartido `nombres_usados`, para que nunca se sobreescriban entre sí dentro de una misma corrida.
+Cada etiqueta se guarda como `<EAN>_<NORMA>.pdf` y `<EAN>_<NORMA>.docx` (o `FILA<n>_<NORMA>` si la fila no trae EAN). Si dos filas del mismo lote producen el mismo nombre, `_ruta_salida_unica` les agrega un sufijo incremental (`_2`, `_3`, …) usando el diccionario compartido `nombres_usados`, para que nunca se sobreescriban entre sí dentro de una misma corrida.
 
 ### 7.4 Validación de nombres de norma (pantalla Configuración)
 
@@ -290,7 +293,7 @@ Notas:
 
 Instalación: `pip install -r requierements` (el nombre del archivo tiene la falta de ortografía tal cual).
 
-Las relevantes en runtime están descritas en la [sección 2](#2-stack-tecnológico). El resto (`pyinstaller-hooks-contrib`, `altgraph`, `pefile`, `pywin32-ctypes`, etc.) son dependencias transitivas de PyInstaller para el build, y `docxtpl`/`python-docx`/`PyPDF2`/`tkcalendar`/`pyxlsb` no se usan actualmente en el código — parecen quedar de un alcance previo o futuro del proyecto.
+Las relevantes en runtime están descritas en la [sección 2](#2-stack-tecnológico). El resto (`pyinstaller-hooks-contrib`, `altgraph`, `pefile`, `pywin32-ctypes`, etc.) son dependencias transitivas de PyInstaller para el build, y `docxtpl`/`PyPDF2`/`tkcalendar`/`pyxlsb` no se usan actualmente en el código — parecen quedar de un alcance previo o futuro del proyecto.
 
 ---
 

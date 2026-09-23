@@ -31,6 +31,7 @@ python -m PyInstaller ^
   --collect-all reportlab ^
   --collect-all pillow ^
   --collect-all pymupdf ^
+  --collect-data docx ^
   app.py
 
 if errorlevel 1 (

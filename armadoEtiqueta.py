@@ -6,10 +6,15 @@ import textwrap
 from functools import lru_cache
 
 import pandas as pd
-from PIL import Image, ImageDraw, ImageFont
+from docx import Document
+from docx.enum.table import WD_ROW_HEIGHT_RULE
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Pt
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
 
 DEFAULT_CONFIG_PATH = os.path.join("data", "config_etiquetas.json")
 DEFAULT_JSON_DIR = os.path.join("data", "etiquetas")
@@ -39,15 +44,6 @@ RUTAS_FUENTE = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
 ]
 
-@lru_cache(maxsize=None)
-def _cargar_fuente(tamano):
-    for ruta in RUTAS_FUENTE:
-        try:
-            return ImageFont.truetype(ruta, tamano)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
 _CARACTERES_INVALIDOS = re.compile(r'[<>:"/\\|?*]')
 
 # Unidades de peso/volumen que indican "contenido neto" (gramos, mililitros,
@@ -57,10 +53,6 @@ _UNIDADES_CONTENIDO_NETO = re.compile(r"\b(ML|MLS?|LTS?|L|KGS?|GRS?|G)\b", re.IG
 def _nombre_archivo_seguro(texto):
     texto = _CARACTERES_INVALIDOS.sub("_", str(texto).strip())
     return texto or "SIN_DATO"
-
-def _medir_texto(draw, texto, font):
-    bbox = draw.textbbox((0, 0), texto, font=font)
-    return bbox[2] - bbox[0]
 
 def cargar_config_etiquetas(config_path=DEFAULT_CONFIG_PATH):
     with open(config_path, "r", encoding="utf-8") as f:
@@ -232,12 +224,31 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
 def _envolver_campos(campos_texto, max_chars):
     return [textwrap.wrap(texto, width=max_chars) or [texto] for _, texto in campos_texto]
 
-def crear_imagen_etiqueta(campos_texto, orientacion="vertical"):
-    """Genera la imagen de la etiqueta ajustando ancho y alto al contenido.
+# El diseño se define en "píxeles a 300 DPI" (constantes de arriba) y se
+# convierte a puntos tipográficos, que es la unidad de PDF y Word.
+_PX_A_PT = 72 / DPI
 
-    El contenido siempre se arma apilado (igual que en vertical); si la norma
-    pide "horizontal" la imagen final se rota 90°, ya que ese formato es para
-    material que se alimenta apaisado en la impresora de etiquetas."""
+def _pt(px):
+    return px * _PX_A_PT
+
+NOMBRE_FUENTE_PDF = "EtiquetaBold"
+
+@lru_cache(maxsize=None)
+def _fuente_pdf():
+    """Registra Arial Bold en reportlab para escribir el texto como texto real
+    (seleccionable/copiable). Si no está disponible usa Helvetica-Bold."""
+    for ruta in RUTAS_FUENTE:
+        try:
+            pdfmetrics.registerFont(TTFont(NOMBRE_FUENTE_PDF, ruta))
+            return NOMBRE_FUENTE_PDF
+        except Exception:
+            continue
+    return "Helvetica-Bold"
+
+def calcular_layout_etiqueta(campos_texto):
+    """Calcula el armado de la etiqueta (bloques, líneas, tamaños y medidas en
+    puntos) ajustando ancho y alto al contenido. El mismo layout se usa para
+    el PDF y para el Word, así ambos salen idénticos."""
     if not campos_texto:
         raise ValueError("No hay campos con datos para generar la etiqueta")
 
@@ -248,82 +259,52 @@ def crear_imagen_etiqueta(campos_texto, orientacion="vertical"):
     excluidos = {c.strip().upper() for c in CAMPOS_ENCABEZADO} | {c.strip().upper() for c in CAMPOS_PIE} | {"TALLA"}
     center_items = [(c, t) for c, t in campos_texto if c.strip().upper() not in excluidos]
 
-    font_header = _cargar_fuente(FONT_SIZE_HEADER)
-    font_body = _cargar_fuente(FONT_SIZE_BODY)
-
-    dummy = ImageDraw.Draw(Image.new("RGB", (10, 10)))
-
+    fuente = _fuente_pdf()
+    bloques = []
     grupos_header = _envolver_campos(header_items, MAX_CHARS_HEADER)
+    if grupos_header:
+        bloques.append({
+            "grupos": grupos_header, "tamano": _pt(FONT_SIZE_HEADER),
+            "interlineado": _pt(FONT_SIZE_HEADER + 14), "espacio_antes": 0,
+        })
     grupos_center = _envolver_campos(center_items, MAX_CHARS_BODY)
+    if grupos_center:
+        bloques.append({
+            "grupos": grupos_center, "tamano": _pt(FONT_SIZE_BODY),
+            "interlineado": _pt(FONT_SIZE_BODY + 12),
+            "espacio_antes": _pt(HEADER_GAP) if grupos_header else 0,
+        })
     grupos_footer = _envolver_campos(footer_items, MAX_CHARS_BODY)
-
-    line_height_header = font_header.size + 14
-    line_height_body = font_body.size + 12
+    if grupos_footer:
+        espacio = _pt(FOOTER_GAP)
+        if grupos_header and not grupos_center:
+            espacio += _pt(HEADER_GAP)
+        bloques.append({
+            "grupos": grupos_footer, "tamano": _pt(FONT_SIZE_BODY),
+            "interlineado": _pt(FONT_SIZE_BODY + 12), "espacio_antes": espacio,
+        })
 
     max_width = 0
-    for grupo in grupos_header:
-        for linea in grupo:
-            max_width = max(max_width, _medir_texto(dummy, linea, font_header))
-    for grupo in grupos_center + grupos_footer:
-        for linea in grupo:
-            max_width = max(max_width, _medir_texto(dummy, linea, font_body))
-
-    def _altura_grupos(grupos, line_height):
-        altura = 0
-        for i, grupo in enumerate(grupos):
-            altura += len(grupo) * line_height
-            if i < len(grupos) - 1:
-                altura += FIELD_SPACER
-        return altura
-
-    altura_total = MARGIN_Y_TOP
-    altura_total += _altura_grupos(grupos_header, line_height_header)
-    if grupos_header:
-        altura_total += HEADER_GAP
-    altura_total += _altura_grupos(grupos_center, line_height_body)
-    if grupos_footer:
-        altura_total += FOOTER_GAP
-        altura_total += _altura_grupos(grupos_footer, line_height_body)
-    altura_total += MARGIN_Y_BOTTOM
-
-    ancho = max(MIN_WIDTH_PX, int(max_width) + 2 * MARGIN_X)
-    alto = max(MIN_HEIGHT_PX, int(altura_total))
-
-    img = Image.new("RGB", (ancho, alto), "white")
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 0, ancho - 1, alto - 1], outline="black", width=2)
-
-    def _dibujar_grupos(y, grupos, font, line_height):
-        for i, grupo in enumerate(grupos):
+    altura = _pt(MARGIN_Y_TOP)
+    for bloque in bloques:
+        altura += bloque["espacio_antes"]
+        for i, grupo in enumerate(bloque["grupos"]):
             for linea in grupo:
-                w = _medir_texto(draw, linea, font)
-                x = (ancho - w) / 2
-                draw.text((x, y), linea, font=font, fill="black")
-                y += line_height
-            if i < len(grupos) - 1:
-                y += FIELD_SPACER
-        return y
+                max_width = max(max_width, pdfmetrics.stringWidth(linea, fuente, bloque["tamano"]))
+            altura += len(grupo) * bloque["interlineado"]
+            if i < len(bloque["grupos"]) - 1:
+                altura += _pt(FIELD_SPACER)
+    altura += _pt(MARGIN_Y_BOTTOM)
 
-    y = MARGIN_Y_TOP
-    y = _dibujar_grupos(y, grupos_header, font_header, line_height_header)
-    if grupos_header:
-        y += HEADER_GAP
-    y = _dibujar_grupos(y, grupos_center, font_body, line_height_body)
-    if grupos_footer:
-        y += FOOTER_GAP
-        _dibujar_grupos(y, grupos_footer, font_body, line_height_body)
+    return {
+        "fuente": fuente,
+        "bloques": bloques,
+        "ancho": max(_pt(MIN_WIDTH_PX), max_width + 2 * _pt(MARGIN_X)),
+        "alto": max(_pt(MIN_HEIGHT_PX), altura),
+    }
 
-    ancho_cm = ancho / DPI * 2.54
-    alto_cm = alto / DPI * 2.54
-
-    if orientacion == "horizontal":
-        img = img.transpose(Image.ROTATE_90)
-        ancho_cm, alto_cm = alto_cm, ancho_cm
-
-    return img, ancho_cm, alto_cm
-
-def guardar_etiqueta_pdf(imagen, ancho_cm, alto_cm, output_dir, nombre_base, nombres_usados):
-    """Guarda una etiqueta como PDF individual (tamaño exacto de la etiqueta).
+def _ruta_salida_unica(output_dir, nombre_base, nombres_usados):
+    """Ruta base (sin extensión) para los archivos de una etiqueta.
 
     `nombres_usados` es un dict compartido entre llamadas para evitar que dos
     etiquetas con el mismo EAN + norma se sobreescriban entre sí.
@@ -334,15 +315,132 @@ def guardar_etiqueta_pdf(imagen, ancho_cm, alto_cm, output_dir, nombre_base, nom
     nombre_final = nombre if contador == 0 else f"{nombre}_{contador + 1}"
 
     os.makedirs(output_dir, exist_ok=True)
-    ruta_salida = os.path.join(output_dir, f"{nombre_final}.pdf")
+    return os.path.join(output_dir, nombre_final)
 
-    ancho_pt = ancho_cm * cm
-    alto_pt = alto_cm * cm
-    c = canvas.Canvas(ruta_salida, pagesize=(ancho_pt, alto_pt))
-    c.drawImage(ImageReader(imagen), 0, 0, width=ancho_pt, height=alto_pt)
+def guardar_etiqueta_pdf(layout, orientacion, ruta_salida):
+    """Guarda la etiqueta como PDF (tamaño exacto de la etiqueta) escribiendo
+    el texto como texto real, para que se pueda seleccionar, copiar y pegar.
+
+    El contenido siempre se arma apilado (igual que en vertical); si la norma
+    pide "horizontal" la página se rota 90°, ya que ese formato es para
+    material que se alimenta apaisado en la impresora de etiquetas."""
+    ancho, alto = layout["ancho"], layout["alto"]
+    fuente = layout["fuente"]
+    pagina = (alto, ancho) if orientacion == "horizontal" else (ancho, alto)
+
+    c = canvas.Canvas(ruta_salida, pagesize=pagina)
+    c.setTitle(os.path.splitext(os.path.basename(ruta_salida))[0])
+    if orientacion == "horizontal":
+        c.translate(alto, 0)
+        c.rotate(90)
+
+    grosor = _pt(2)
+    c.setLineWidth(grosor)
+    c.rect(grosor / 2, grosor / 2, ancho - grosor, alto - grosor, stroke=1, fill=0)
+
+    y = _pt(MARGIN_Y_TOP)  # medido desde arriba
+    for bloque in layout["bloques"]:
+        y += bloque["espacio_antes"]
+        tamano = bloque["tamano"]
+        ascenso = pdfmetrics.getAscent(fuente, tamano)
+        c.setFont(fuente, tamano)
+        for i, grupo in enumerate(bloque["grupos"]):
+            for linea in grupo:
+                c.drawCentredString(ancho / 2, alto - y - ascenso, linea)
+                y += bloque["interlineado"]
+            if i < len(bloque["grupos"]) - 1:
+                y += _pt(FIELD_SPACER)
+
     c.showPage()
     c.save()
+    return ruta_salida
 
+def _agregar_xml(padre, etiqueta, atributos=None, hijos=()):
+    elemento = OxmlElement(etiqueta)
+    for clave, valor in (atributos or {}).items():
+        elemento.set(qn(clave), valor)
+    for hijo_tag, hijo_attrs in hijos:
+        _agregar_xml(elemento, hijo_tag, hijo_attrs)
+    padre.append(elemento)
+    return elemento
+
+def guardar_etiqueta_docx(layout, orientacion, ruta_salida):
+    """Guarda la etiqueta como documento de Word (.docx) con el mismo tamaño,
+    borde, fuente y acomodo que el PDF, para poder editarla o copiar su texto.
+
+    La etiqueta es una tabla de una celda con borde que ocupa toda la página;
+    en orientación horizontal se gira el texto de la celda 90° (abajo→arriba)."""
+    ancho, alto = layout["ancho"], layout["alto"]
+    horizontal = orientacion == "horizontal"
+    pag_ancho, pag_alto = (alto, ancho) if horizontal else (ancho, alto)
+
+    doc = Document()
+    doc.core_properties.title = os.path.splitext(os.path.basename(ruta_salida))[0]
+    seccion = doc.sections[0]
+    seccion.page_width = Pt(pag_ancho)
+    seccion.page_height = Pt(pag_alto)
+    # Un pequeño margen evita que Word recorte el borde contra la orilla de la página.
+    margen_borde = 2
+    for margen in ("header_distance", "footer_distance", "gutter"):
+        setattr(seccion, margen, Pt(0))
+    for margen in ("top_margin", "bottom_margin", "left_margin", "right_margin"):
+        setattr(seccion, margen, Pt(margen_borde))
+
+    tabla = doc.add_table(rows=1, cols=1)
+    tabla.autofit = False
+    _agregar_xml(tabla._tbl.tblPr, "w:tblLayout", {"w:type": "fixed"})
+
+    fila = tabla.rows[0]
+    fila.height = Pt(pag_alto - 2 * margen_borde)
+    fila.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+    tabla.columns[0].width = Pt(pag_ancho - 2 * margen_borde)
+    celda = fila.cells[0]
+    celda.width = Pt(pag_ancho - 2 * margen_borde)
+
+    tc_pr = celda._tc.get_or_add_tcPr()
+    lados = ("top", "left", "bottom", "right")
+    borde = {"w:val": "single", "w:sz": "4", "w:space": "0", "w:color": "000000"}
+    _agregar_xml(tc_pr, "w:tcBorders", hijos=[(f"w:{lado}", borde) for lado in lados])
+    _agregar_xml(tc_pr, "w:tcMar", hijos=[(f"w:{lado}", {"w:w": "0", "w:type": "dxa"}) for lado in lados])
+    if horizontal:
+        _agregar_xml(tc_pr, "w:textDirection", {"w:val": "btLr"})
+
+    primero = True
+    for bloque in layout["bloques"]:
+        for i, grupo in enumerate(bloque["grupos"]):
+            parrafo = celda.paragraphs[0] if primero else celda.add_paragraph()
+            if primero:
+                antes = _pt(MARGIN_Y_TOP) - margen_borde + bloque["espacio_antes"]
+            else:
+                antes = bloque["espacio_antes"] if i == 0 else _pt(FIELD_SPACER)
+            primero = False
+
+            formato = parrafo.paragraph_format
+            formato.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            formato.space_before = Pt(antes)
+            formato.space_after = Pt(0)
+            formato.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+            formato.line_spacing = Pt(bloque["interlineado"])
+
+            for j, linea in enumerate(grupo):
+                run = parrafo.add_run(linea)
+                run.bold = True
+                run.font.name = "Arial"
+                run.font.size = Pt(bloque["tamano"])
+                if j < len(grupo) - 1:
+                    run.add_break()
+
+    # Word exige un párrafo después de la tabla; se deja oculto y de 1 pt para
+    # que no genere una segunda página.
+    final = doc.add_paragraph()
+    formato = final.paragraph_format
+    formato.space_before = Pt(0)
+    formato.space_after = Pt(0)
+    formato.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    formato.line_spacing = Pt(1)
+    _agregar_xml(final._p.get_or_add_pPr(), "w:rPr", hijos=[("w:vanish", {}), ("w:sz", {"w:val": "2"})])
+
+    doc.save(ruta_salida)
     return ruta_salida
 
 def generar_etiquetas_desde_excel(
@@ -375,6 +473,7 @@ def generar_etiquetas_desde_excel(
     os.makedirs(output_dir, exist_ok=True)
 
     archivos_generados = []
+    archivos_word = []
     errores = []
     detalle = []
     nombres_usados = {}
@@ -389,6 +488,7 @@ def generar_etiquetas_desde_excel(
             "campos": [c for c, _ in item["campos_texto"]],
             "error": item["error"],
             "pdf_path": None,
+            "docx_path": None,
         }
 
         if item["error"]:
@@ -397,7 +497,7 @@ def generar_etiquetas_desde_excel(
             continue
 
         try:
-            img, ancho_cm, alto_cm = crear_imagen_etiqueta(item["campos_texto"], item["orientacion"])
+            layout = calcular_layout_etiqueta(item["campos_texto"])
         except Exception as e:
             mensaje = f"error generando la etiqueta ({e})"
             errores.append(f"Fila {idx}: {mensaje}")
@@ -409,8 +509,10 @@ def generar_etiquetas_desde_excel(
         nombre_base = f"{ean}_{item['norma']}"
         carpeta_norma = os.path.join(output_dir, _nombre_archivo_seguro(item["norma"]))
 
+        ruta_base = _ruta_salida_unica(carpeta_norma, nombre_base, nombres_usados)
         try:
-            ruta_salida = guardar_etiqueta_pdf(img, ancho_cm, alto_cm, carpeta_norma, nombre_base, nombres_usados)
+            ruta_pdf = guardar_etiqueta_pdf(layout, item["orientacion"], ruta_base + ".pdf")
+            ruta_docx = guardar_etiqueta_docx(layout, item["orientacion"], ruta_base + ".docx")
         except Exception as e:
             mensaje = f"error guardando la etiqueta ({e})"
             errores.append(f"Fila {idx}: {mensaje}")
@@ -418,9 +520,11 @@ def generar_etiquetas_desde_excel(
             detalle.append(registro)
             continue
 
-        registro["pdf_path"] = ruta_salida
-        archivos_generados.append(ruta_salida)
-        log(f"Fila {idx}: etiqueta guardada -> {os.path.basename(ruta_salida)}")
+        registro["pdf_path"] = ruta_pdf
+        registro["docx_path"] = ruta_docx
+        archivos_generados.append(ruta_pdf)
+        archivos_word.append(ruta_docx)
+        log(f"Fila {idx}: etiqueta guardada -> {os.path.basename(ruta_base)} (.pdf y .docx)")
         detalle.append(registro)
 
     if not archivos_generados:
@@ -435,6 +539,7 @@ def generar_etiquetas_desde_excel(
         "json_path": json_path,
         "output_dir": output_dir,
         "archivos": archivos_generados,
+        "archivos_word": archivos_word,
         "detalle": detalle,
     }
 
