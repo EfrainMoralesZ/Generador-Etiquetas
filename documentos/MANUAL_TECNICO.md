@@ -37,11 +37,12 @@ Todas las versiones exactas están fijadas en [`requierements`](#10-dependencias
 ```
 Generador Etiquetas/
 ├── app.py                  # Interfaz gráfica completa (una sola clase, una sola ventana)
-├── armadoEtiqueta.py        # Lógica de negocio: Excel → validación → layout → PDF + Word
+├── armadoEtiqueta.py        # Lógica de negocio: Excel → validación → PDF + Word
+├── plantilla_asignaciones.py # Plantilla de impresión: hoja membretada con la etiqueta (PDF + Word)
 ├── configuracion.py         # CRUD de normas sobre data/config_etiquetas.json
 ├── build_exe.bat            # Script de empaquetado a ejecutable de Windows
 ├── requierements             # Dependencias pip (congeladas por versión)
-├── img/                      # Icono del ejecutable (img/icono.ico), sin uso en runtime
+├── img/                      # icono.ico (ejecutable) y Membrete.jpg (fondo de cada hoja, se lee en runtime)
 └── data/
     ├── config_etiquetas.json # Catálogo de normas y sus campos (editable desde "Configuración")
     ├── estado_app.json       # Manifiesto liviano de todos los lotes generados
@@ -133,7 +134,7 @@ flowchart TD
     Check -- "No" --> Habilita["Botón 'Generar Etiquetas' habilitado"]
     Habilita --> Click["Usuario hace clic en Generar"]
     Click --> Gen["generar_etiquetas_desde_excel()\n(hilo aparte)"]
-    Gen --> PorFila["Por cada fila:\n_analizar_fila → crear_imagen_etiqueta → guardar_etiqueta_pdf"]
+    Gen --> PorFila["Por cada fila:\n_analizar_fila → calcular_plantilla → guardar_plantilla_pdf / guardar_plantilla_docx"]
     PorFila --> Lote["Se arma el 'detalle' del lote\n(ean, marca, norma, error, pdf_path)"]
     Lote --> Guardar["Se guarda en data/lotes/&lt;id&gt;.jsonl\n+ se agrega al manifiesto estado_app.json"]
     Guardar --> Historial["Visible en 'Etiquetas generadas'\npara siempre (buscar, previsualizar, descargar, borrar)"]
@@ -165,14 +166,31 @@ Sin dependencia de Tkinter; se podría usar desde una CLI (de hecho tiene un `ma
 | `_analizar_fila(fila, idx, mapa, config)` | Determina norma + campos + error de una fila. Punto único de verdad compartido por previsualización y generación |
 | `_filas_sin_codigo_formato(registros)` | Lista de números de fila (1-based) sin valor en `CODIGO FORMATO` |
 | `previsualizar_etiquetas_desde_excel(excel_path, ...)` | Analiza sin generar PDFs; devuelve resumen + `filas_sin_codigo_formato` para la UI |
-| `crear_imagen_etiqueta(campos_texto)` | Dibuja la etiqueta como imagen PIL, con ancho/alto dinámicos según el contenido (mínimo 700×380 px @ 300 DPI) |
-| `calcular_layout_etiqueta(campos_texto)` | Calcula bloques, líneas, tamaños de fuente y medidas (en puntos) de la etiqueta; lo comparten PDF y Word |
-| `guardar_etiqueta_pdf(layout, orientacion, ruta_salida)` | Escribe el PDF con texto real (seleccionable/copiable) del tamaño exacto de la etiqueta |
-| `guardar_etiqueta_docx(layout, orientacion, ruta_salida)` | Escribe el `.docx` con el mismo tamaño, borde y acomodo; en horizontal gira el texto de la celda |
+| `_titulo_hoja(fila, ean)` | Título de la hoja: asignación (o EAN) + descripción + contenido, ej. `TJX028 CREMA FACIAL 50 ml` |
 | `_ruta_salida_unica(output_dir, nombre_base, nombres_usados)` | Devuelve la ruta base (sin extensión); `nombres_usados` evita que dos etiquetas con el mismo nombre se sobreescriban (les agrega sufijo `_2`, `_3`, …) |
 | `generar_etiquetas_desde_excel(excel_path, output_dir, ...)` | Orquesta todo: valida, genera un PDF y un Word por fila válida, devuelve el `detalle` completo del lote |
 
-**Layout de la etiqueta** (`calcular_layout_etiqueta`): los campos se agrupan en tres bloques verticales — encabezado (`EAN`, luego `MARCA`, centrados y en fuente grande), cuerpo (el resto de los campos de la norma) y pie (`IMPORTADOR` y `TALLA`, si existen). El texto largo se envuelve con `textwrap` (32 caracteres en encabezado, 38 en cuerpo/pie). El tamaño final de la etiqueta —y por lo tanto del PDF y del Word— se calcula sumando las alturas de cada bloque más márgenes fijos, así que **cada etiqueta tiene un tamaño de página distinto** según cuánto texto lleve.
+### 6.1.1 `plantilla_asignaciones.py` — plantilla de impresión
+
+Replica `TJX028 CREMA FACIAL 50 ml.docx`: cada etiqueta sale en una **hoja carta** con `img/Membrete.jpg` de fondo y, de arriba abajo:
+
+1. **Título** (Calibri negrita 11): `ASIGN DESCRIPCION CONTENIDO`. Si el Excel no trae columna de asignación se usa el EAN.
+2. **Subtítulo** fijo (Tw Cen MT 14): constante `SUBTITULO`.
+3. **Tipo** (Tw Cen MT 14): `Tipo: Costura` / `Tipo: Adherible`, de la columna `TIPO DE ETIQUETA` (o `TIPO`); si la fila no trae valor, se omite el renglón.
+4. **Recuadro de la etiqueta** centrado, de 7 × 9 cm como mínimo (en horizontal se intercambian las medidas). Los campos van en Arial, centrados y **en el orden configurado en la norma**: `DESCRIPCION`/`DENOMINACION`/`EAN`/`MARCA` en negrita 11, `CONTENIDO` en negrita 14 y el resto en 10. Si el texto no cabe en la hoja, la letra se reduce hasta un 60 %.
+5. **"Altura del contenido"** y debajo su valor (ej. `2mm`), a la izquierda del recuadro y a la altura del contenido, tomado de la columna `MEDIDAS`. Si el Excel trae **dos** columnas `MEDIDAS` (pandas nombra la segunda `MEDIDAS.1`), la segunda es la altura y la primera son las medidas del producto, que se siguen imprimiendo dentro de la etiqueta en las normas que las llevan; si trae una sola, esa es la altura (`_altura_contenido`). Si la fila no trae altura, no se muestra.
+
+`TIPO DE ETIQUETA` / `TIPO` (y `MEDIDAS` cuando es la única columna de medidas) se muestran fuera del recuadro, así que **nunca se imprimen dentro de la etiqueta** aunque estén entre los campos de la norma.
+
+| Función | Qué hace |
+|---|---|
+| `calcular_plantilla(campos_texto, titulo, tipo, altura_contenido, orientacion)` | Calcula en puntos la posición de todo lo que va en la hoja; lo comparten PDF y Word |
+| `guardar_plantilla_pdf(plantilla, ruta_salida)` | Escribe el PDF con texto real (seleccionable/copiable) |
+| `guardar_plantilla_docx(plantilla, ruta_salida)` | Escribe el `.docx` editable: membrete en el encabezado, detrás del texto; la etiqueta es una tabla de tres columnas (anotación, recuadro con borde, vacía) |
+
+El membrete original viene en CMYK y pesa ~1 MB; `_membrete_rgb` lo convierte una sola vez en memoria a RGB a 200 dpi (python-docx no acepta ese JPEG tal cual) y se reutiliza en todas las hojas. Si no se encuentra `img/Membrete.jpg`, la generación se detiene con un mensaje antes de procesar filas.
+
+Si la fila trae asignación, los archivos se llaman como el título (`TJX028 CREMA FACIAL 50 ml.pdf`); si no, como antes (`<EAN>_<norma>`).
 
 ### 6.2 `app.py` — interfaz gráfica
 
@@ -237,12 +255,15 @@ Los **demás** tipos de error de fila (código que no coincide con ninguna norma
 | `PAIS ORIGEN` / `PAIS DE ORIGEN` / `PAIS` | `"HECHO EN {valor}"` (mayúsculas) | `MEXICO` → `HECHO EN MEXICO` |
 | `TALLA` | `"TALLA {valor}"` | `M` → `TALLA M` |
 | `FORRO` | `"FORRO {valor}"` (mayúsculas) | `ALGODON` → `FORRO ALGODON` |
+| `CONTENIDO` | Sin prefijo: se imprime solo el valor, en negrita y más grande | `50 ml` → `50 ml` |
+| `INGREDIENTES` | `"Ingredientes: {valor}"` (si no lo trae ya) | `Ver Etiqueta` → `Ingredientes: Ver Etiqueta` |
+| `IMPORTADOR` | `"Importado por: {valor}"` (si no lo trae ya) | `MULTIBRAND ...` → `Importado por: MULTIBRAND ...` |
 
 > **Nota técnica:** la condición para `FORRO` está escrita como `if campo_norm in ("FORRO"):`. Al faltarle la coma final, Python no interpreta `("FORRO")` como una tupla de un elemento sino como el string `"FORRO"` plano, así que `in` hace **verificación de substring**, no de igualdad — el bloque se dispara para cualquier `campo_norm` que sea substring de `"FORRO"` (`"FOR"`, `"ORRO"`, `"R"`, etc.), no solo para el campo exactamente llamado `FORRO`. En la práctica no suele causar problemas porque los nombres de campo de las normas configuradas no chocan con substrings de "FORRO", pero conviene tenerlo presente si se agrega algún campo con un nombre corto parecido. La forma correcta sería `campo_norm == "FORRO"` o `campo_norm in ("FORRO",)`.
 
 ### 7.3 Nomenclatura y de-duplicación de archivos PDF / Word
 
-Cada etiqueta se guarda como `<EAN>_<NORMA>.pdf` y `<EAN>_<NORMA>.docx` (o `FILA<n>_<NORMA>` si la fila no trae EAN). Si dos filas del mismo lote producen el mismo nombre, `_ruta_salida_unica` les agrega un sufijo incremental (`_2`, `_3`, …) usando el diccionario compartido `nombres_usados`, para que nunca se sobreescriban entre sí dentro de una misma corrida.
+Si la fila trae asignación (`ASIGN`), cada etiqueta se guarda con el título de la hoja, ej. `TJX028 CREMA FACIAL 50 ml.pdf`; si no, como `<EAN>_<NORMA>.pdf` y `<EAN>_<NORMA>.docx` (o `FILA<n>_<NORMA>` si la fila tampoco trae EAN). Si dos filas del mismo lote producen el mismo nombre, `_ruta_salida_unica` les agrega un sufijo incremental (`_2`, `_3`, …) usando el diccionario compartido `nombres_usados`, para que nunca se sobreescriban entre sí dentro de una misma corrida.
 
 ### 7.4 Validación de nombres de norma (pantalla Configuración)
 

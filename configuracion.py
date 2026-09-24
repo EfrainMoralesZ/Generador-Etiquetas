@@ -23,9 +23,14 @@ def cargar_config(config_path=CONFIG_PATH):
 
 
 def guardar_config(config, config_path=CONFIG_PATH):
+    # Se escribe primero a un temporal y luego se reemplaza el original, para
+    # que un fallo a medio guardar (o OneDrive bloqueando el archivo) no deje
+    # el JSON truncado ahora que se guarda en cada cambio de campo.
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
+    temporal = config_path + ".tmp"
+    with open(temporal, "w", encoding="utf-8") as f:
         json.dump(config, f, ensure_ascii=False, indent=4)
+    os.replace(temporal, config_path)
 
 
 def listar_normas(config):
@@ -117,4 +122,56 @@ def eliminar_campo(config, nombre, campo):
     campos = config.get(nombre, {}).get("campos", [])
     if campo in campos:
         campos.remove(campo)
+    return config
+
+
+def mover_campo(config, nombre, campo, desplazamiento):
+    """Mueve un campo `desplazamiento` posiciones (-1 sube, +1 baja). El orden
+    de la lista es el orden en que se imprimen los campos en la etiqueta."""
+    campos = config.get(nombre, {}).get("campos", [])
+    if campo not in campos:
+        return config
+    origen = campos.index(campo)
+    destino = max(0, min(len(campos) - 1, origen + desplazamiento))
+    campos.insert(destino, campos.pop(origen))
+    return config
+
+
+def mover_campo_y_guardar(nombre, campo, desplazamiento, config_path=CONFIG_PATH):
+    """Reordena un campo de una norma existente y lo escribe en el JSON.
+    Devuelve el config actualizado."""
+    config = cargar_config(config_path)
+    if nombre not in config:
+        raise KeyError(f"La norma '{nombre}' no existe.")
+    mover_campo(config, nombre, campo, desplazamiento)
+    guardar_config(config, config_path)
+    return config
+
+
+def agregar_campo_y_guardar(nombre, campo, config_path=CONFIG_PATH):
+    """Agrega un campo a una norma existente y lo escribe en el JSON.
+
+    Relee el archivo antes de modificarlo para no pisar cambios hechos por
+    fuera de la app. Devuelve el config actualizado."""
+    config = cargar_config(config_path)
+    if nombre not in config:
+        raise KeyError(f"La norma '{nombre}' no existe.")
+    agregar_campo(config, nombre, campo)
+    guardar_config(config, config_path)
+    return config
+
+
+def eliminar_campo_y_guardar(nombre, campo, config_path=CONFIG_PATH):
+    """Quita un campo de una norma existente y lo escribe en el JSON.
+
+    Una norma debe conservar al menos un campo. Devuelve el config
+    actualizado."""
+    config = cargar_config(config_path)
+    if nombre not in config:
+        raise KeyError(f"La norma '{nombre}' no existe.")
+    campos = obtener_campos(config, nombre)
+    if campo in campos and len(campos) <= 1:
+        raise ValueError("Una norma debe tener al menos un campo.")
+    eliminar_campo(config, nombre, campo)
+    guardar_config(config, config_path)
     return config

@@ -1581,18 +1581,32 @@ class GenerdorEtiquetas:
             ).pack(anchor="w", pady=4)
             return
 
-        for campo in self._campos_editor:
+        # El orden de la lista es el orden en que se imprime en la etiqueta.
+        ultimo = len(self._campos_editor) - 1
+        for i, campo in enumerate(self._campos_editor):
             fila = ctk.CTkFrame(self.lista_campos_frame, fg_color=STYLE["fondo"], corner_radius=6)
             fila.pack(fill="x", pady=2)
             ctk.CTkLabel(
+                fila, text=f"{i + 1}.", width=24, font=FONT_TINY,
+                text_color=STYLE["texto_secundario"], anchor="e"
+            ).pack(side="left", padx=(8, 0), pady=6)
+            ctk.CTkLabel(
                 fila, text=campo, font=FONT_SMALL, text_color=STYLE["texto_oscuro"], anchor="w"
-            ).pack(side="left", padx=10, pady=6)
+            ).pack(side="left", padx=8, pady=6)
             ctk.CTkButton(
                 fila, text="✕", width=26, height=26, font=FONT_TINY,
                 fg_color="transparent", hover_color=STYLE["advertencia_suave"],
                 text_color=STYLE["texto_secundario"], corner_radius=6,
                 command=lambda c=campo: self._quitar_campo_editor(c)
-            ).pack(side="right", padx=6, pady=4)
+            ).pack(side="right", padx=(2, 6), pady=4)
+            for texto, desplazamiento, habilitado in (("▼", 1, i < ultimo), ("▲", -1, i > 0)):
+                ctk.CTkButton(
+                    fila, text=texto, width=26, height=26, font=FONT_TINY,
+                    fg_color="transparent", hover_color=STYLE["surface_alt"],
+                    text_color=STYLE["texto_secundario"], corner_radius=6,
+                    state="normal" if habilitado else "disabled",
+                    command=lambda c=campo, d=desplazamiento: self._mover_campo_editor(c, d)
+                ).pack(side="right", padx=2, pady=4)
 
     def _agregar_campo_editor(self):
         campo = self.entrada_nuevo_campo.get().strip().upper()
@@ -1601,13 +1615,60 @@ class GenerdorEtiquetas:
         if campo in self._campos_editor:
             messagebox.showwarning("Campo repetido", f"El campo '{campo}' ya está en la lista.")
             return
-        self._campos_editor.append(campo)
+
+        # Una norma nueva todavía no existe en el JSON: sus campos se escriben
+        # al pulsar "Guardar cambios". Una existente se guarda al momento.
+        if not self._creando_norma:
+            try:
+                self._normas_config = configuracion.agregar_campo_y_guardar(
+                    self._norma_seleccionada, campo
+                )
+            except (KeyError, ValueError, OSError) as e:
+                messagebox.showerror("No se pudo agregar el campo", str(e))
+                return
+            self._campos_editor = configuracion.obtener_campos(
+                self._normas_config, self._norma_seleccionada
+            )
+            self._refrescar_lista_normas()
+        else:
+            self._campos_editor.append(campo)
+
         self.entrada_nuevo_campo.delete(0, "end")
         self._renderizar_campos_editor()
 
     def _quitar_campo_editor(self, campo):
-        if campo in self._campos_editor:
+        if not self._creando_norma:
+            try:
+                self._normas_config = configuracion.eliminar_campo_y_guardar(
+                    self._norma_seleccionada, campo
+                )
+            except (KeyError, ValueError, OSError) as e:
+                messagebox.showerror("No se pudo quitar el campo", str(e))
+                return
+            self._campos_editor = configuracion.obtener_campos(
+                self._normas_config, self._norma_seleccionada
+            )
+            self._refrescar_lista_normas()
+        elif campo in self._campos_editor:
             self._campos_editor.remove(campo)
+        self._renderizar_campos_editor()
+
+    def _mover_campo_editor(self, campo, desplazamiento):
+        if not self._creando_norma:
+            try:
+                self._normas_config = configuracion.mover_campo_y_guardar(
+                    self._norma_seleccionada, campo, desplazamiento
+                )
+            except (KeyError, OSError) as e:
+                messagebox.showerror("No se pudo mover el campo", str(e))
+                return
+            self._campos_editor = configuracion.obtener_campos(
+                self._normas_config, self._norma_seleccionada
+            )
+        elif campo in self._campos_editor:
+            origen = self._campos_editor.index(campo)
+            destino = max(0, min(len(self._campos_editor) - 1, origen + desplazamiento))
+            self._campos_editor.insert(destino, self._campos_editor.pop(origen))
         self._renderizar_campos_editor()
 
     def _cambiar_orientacion_editor(self, valor):

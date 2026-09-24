@@ -1,29 +1,100 @@
 {
     "NOM-004-SE-2021": {
-        "campos": ["EAN", "MARCA", "INSUMOS", "FORRO", "CUIDADO", "PAIS ORIGEN", "IMPORTADOR", "TALLA"]
+        "campos": [
+            "MARCA",
+            "INSUMOS",
+            "FORRO",
+            "CUIDADO",
+            "PAIS ORIGEN",
+            "IMPORTADOR",
+            "TALLA"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-015-SCFI-2007": {
-        "campos": ["EAN", "MARCA", "LEYENDAS", "EDAD ", "PAIS ORIGEN", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "LEYENDAS",
+            "EDAD",
+            "PAIS ORIGEN",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-020-SCFI-1997": {
-        "campos": ["EAN", "MARCA", "INSUMOS", "PAIS ORIGEN", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "INSUMOS",
+            "PAIS ORIGEN",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-024-SCFI-2013": {
-        "campos": ["EAN", "MARCA", "DESCRIPCION", "CARACTERISTICAS", "PAIS ORIGEN", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "DESCRIPCION",
+            "CARACTERISTICAS",
+            "PAIS ORIGEN",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-050-SCFI-2004-1": {
-        "campos": ["EAN", "MARCA", "DESCRIPCION", "MEDIDAS", "LEYENDAS", "CONTENIDO", "INSUMOS", "PAIS ORIGEN", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "DESCRIPCION",
+            "MEDIDAS",
+            "LEYENDAS",
+            "INSUMOS",
+            "PAIS ORIGEN",
+            "CONTENIDO",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-141-SSA1 SCFI-2012": {
-        "campos": ["EAN", "MARCA", "DESCRIPCION", "INGREDIENTES", "CONTENIDO", "LEYENDAS", "PAIS ORIGEN", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "DESCRIPCION",
+            "INGREDIENTES",
+            "CONTENIDO",
+            "LEYENDAS",
+            "PAIS ORIGEN",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-189-SSA1 SCFI-2018": {
-        "campos": ["EAN", "MARCA", "CONTENIDO NETO", "INSUMOS O INGREDIENTES", "LEYENDAS", "PAIS ORIGEN", "CONTENIDO", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "CONTENIDO NETO",
+            "INSUMOS O INGREDIENTES",
+            "LEYENDAS",
+            "PAIS ORIGEN",
+            "CONTENIDO",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-142-SSA1 SCFI-2014": {
-        "campos": ["EAN", "MARCA", "INGREDIENTES", "CONTENIDO", "LOTE", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "INGREDIENTES",
+            "CONTENIDO",
+            "LOTE",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     },
     "NOM-051-SCFI SSA1-2010": {
-        "campos": ["EAN", "MARCA", "INGREDIENTES", "CONTENIDO", "LOTE", "IMPORTADOR"]
+        "campos": [
+            "MARCA",
+            "INGREDIENTES",
+            "CONTENIDO",
+            "LOTE",
+            "IMPORTADOR"
+        ],
+        "orientacion": "vertical"
     }
 }

@@ -1,4 +1,48 @@
 {
   "lotes": [
+    {
+      "id": "BD_MOS_Actualizada_xlsx_20260924135258",
+      "nombre_excel": "BD_MOS_Actualizada.xlsx",
+      "fecha": "24/09/2026 · 13:52",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD_MOS_Actualizada_20260924_135249",
+      "json_path": "data\\etiquetas\\BD_MOS_Actualizada.json",
+      "detalle_path": "data\\lotes\\BD_MOS_Actualizada_xlsx_20260924135258.jsonl",
+      "total_filas": 52,
+      "generadas": 52,
+      "total_detalle": 52
+    },
+    {
+      "id": "BD_MOS_Actualizada_xlsx_20260924141910",
+      "nombre_excel": "BD_MOS_Actualizada.xlsx",
+      "fecha": "24/09/2026 · 14:19",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD_MOS_Actualizada_20260924_141901",
+      "json_path": "data\\etiquetas\\BD_MOS_Actualizada.json",
+      "detalle_path": "data\\lotes\\BD_MOS_Actualizada_xlsx_20260924141910.jsonl",
+      "total_filas": 52,
+      "generadas": 52,
+      "total_detalle": 52
+    },
+    {
+      "id": "BD_MOS_Actualizada_xlsx_20260924142849",
+      "nombre_excel": "BD_MOS_Actualizada.xlsx",
+      "fecha": "24/09/2026 · 14:28",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD_MOS_Actualizada_20260924_142841",
+      "json_path": "data\\etiquetas\\BD_MOS_Actualizada.json",
+      "detalle_path": "data\\lotes\\BD_MOS_Actualizada_xlsx_20260924142849.jsonl",
+      "total_filas": 52,
+      "generadas": 52,
+      "total_detalle": 52
+    },
+    {
+      "id": "BD_MOS_Actualizada_xlsx_20260924143625",
+      "nombre_excel": "BD_MOS_Actualizada.xlsx",
+      "fecha": "24/09/2026 · 14:36",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD_MOS_Actualizada_20260924_143617",
+      "json_path": "data\\etiquetas\\BD_MOS_Actualizada.json",
+      "detalle_path": "data\\lotes\\BD_MOS_Actualizada_xlsx_20260924143625.jsonl",
+      "total_filas": 52,
+      "generadas": 52,
+      "total_detalle": 52
+    }
   ]
 }

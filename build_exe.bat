@@ -47,7 +47,12 @@ REM configuracion base debe quedar junto al ejecutable generado.
 if not exist "dist\data" mkdir "dist\data"
 copy /Y "data\config_etiquetas.json" "dist\data\config_etiquetas.json" >nul
 
+REM plantilla_asignaciones.py lee el membrete de "img\Membrete.jpg" con ruta
+REM relativa, igual que data\, asi que tambien debe ir junto al ejecutable.
+if not exist "dist\img" mkdir "dist\img"
+copy /Y "img\Membrete.jpg" "dist\img\Membrete.jpg" >nul
+
 echo.
 echo Build completado. Ejecutable en:
 echo dist\GeneradorEtiquetas.exe
-echo (junto con dist\data\config_etiquetas.json, necesario para que arranque)
+echo (junto con dist\data\config_etiquetas.json y dist\img\Membrete.jpg, necesarios para que funcione)
