@@ -178,6 +178,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = False
         self._campos_editor = []
+        self._campo_editando = None
         self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
 
         self.root = ctk.CTk()
@@ -1433,6 +1434,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = False
         self._campos_editor = []
+        self._campo_editando = None
         self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
@@ -1464,6 +1466,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = nombre
         self._creando_norma = False
         self._campos_editor = configuracion.obtener_campos(self._normas_config, nombre)
+        self._campo_editando = None
         self._orientacion_editor = configuracion.obtener_orientacion(self._normas_config, nombre)
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
@@ -1472,6 +1475,7 @@ class GenerdorEtiquetas:
         self._norma_seleccionada = None
         self._creando_norma = True
         self._campos_editor = []
+        self._campo_editando = None
         self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
@@ -1590,15 +1594,27 @@ class GenerdorEtiquetas:
                 fila, text=f"{i + 1}.", width=24, font=FONT_TINY,
                 text_color=STYLE["texto_secundario"], anchor="e"
             ).pack(side="left", padx=(8, 0), pady=6)
-            ctk.CTkLabel(
+            if campo == self._campo_editando:
+                self._renderizar_edicion_campo(fila, campo)
+                continue
+
+            etiqueta = ctk.CTkLabel(
                 fila, text=campo, font=FONT_SMALL, text_color=STYLE["texto_oscuro"], anchor="w"
-            ).pack(side="left", padx=8, pady=6)
+            )
+            etiqueta.pack(side="left", padx=8, pady=6)
+            etiqueta.bind("<Double-Button-1>", lambda e, c=campo: self._editar_campo_editor(c))
             ctk.CTkButton(
                 fila, text="✕", width=26, height=26, font=FONT_TINY,
                 fg_color="transparent", hover_color=STYLE["advertencia_suave"],
                 text_color=STYLE["texto_secundario"], corner_radius=6,
                 command=lambda c=campo: self._quitar_campo_editor(c)
             ).pack(side="right", padx=(2, 6), pady=4)
+            ctk.CTkButton(
+                fila, text="✎", width=26, height=26, font=FONT_TINY,
+                fg_color="transparent", hover_color=STYLE["surface_alt"],
+                text_color=STYLE["texto_secundario"], corner_radius=6,
+                command=lambda c=campo: self._editar_campo_editor(c)
+            ).pack(side="right", padx=2, pady=4)
             for texto, desplazamiento, habilitado in (("▼", 1, i < ultimo), ("▲", -1, i > 0)):
                 ctk.CTkButton(
                     fila, text=texto, width=26, height=26, font=FONT_TINY,
@@ -1607,6 +1623,61 @@ class GenerdorEtiquetas:
                     state="normal" if habilitado else "disabled",
                     command=lambda c=campo, d=desplazamiento: self._mover_campo_editor(c, d)
                 ).pack(side="right", padx=2, pady=4)
+
+    def _renderizar_edicion_campo(self, fila, campo):
+        """Fila en modo edición: cuadro de texto con el nombre actual.
+        Enter o ✓ guardan; Esc o ✕ cancelan."""
+        entrada = ctk.CTkEntry(fila, font=FONT_SMALL, height=28)
+        entrada.insert(0, campo)
+        entrada.pack(side="left", fill="x", expand=True, padx=8, pady=4)
+        entrada.bind("<Return>", lambda e: self._renombrar_campo_editor(campo, entrada.get()))
+        entrada.bind("<Escape>", lambda e: self._editar_campo_editor(None))
+        ctk.CTkButton(
+            fila, text="✕", width=26, height=26, font=FONT_TINY,
+            fg_color="transparent", hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_secundario"], corner_radius=6,
+            command=lambda: self._editar_campo_editor(None)
+        ).pack(side="right", padx=(2, 6), pady=4)
+        ctk.CTkButton(
+            fila, text="✓", width=26, height=26, font=FONT_TINY,
+            fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
+            text_color=STYLE["texto_oscuro"], corner_radius=6,
+            command=lambda: self._renombrar_campo_editor(campo, entrada.get())
+        ).pack(side="right", padx=2, pady=4)
+        entrada.after(10, lambda: (entrada.focus_set(), entrada.select_range(0, "end")))
+
+    def _editar_campo_editor(self, campo):
+        """Pone un campo en modo edición (o sale de él con `campo=None`)."""
+        self._campo_editando = campo
+        self._renderizar_campos_editor()
+
+    def _renombrar_campo_editor(self, anterior, nuevo):
+        nuevo = (nuevo or "").strip().upper()
+        if not nuevo:
+            messagebox.showwarning("Campo vacío", "El nombre del campo no puede estar vacío.")
+            return
+        if nuevo == anterior:
+            self._editar_campo_editor(None)
+            return
+        if nuevo in self._campos_editor:
+            messagebox.showwarning("Campo repetido", f"El campo '{nuevo}' ya está en la lista.")
+            return
+
+        # Igual que agregar/quitar: en una norma existente se guarda al momento.
+        if not self._creando_norma:
+            try:
+                self._normas_config = configuracion.renombrar_campo_y_guardar(
+                    self._norma_seleccionada, anterior, nuevo
+                )
+            except (KeyError, ValueError, OSError) as e:
+                messagebox.showerror("No se pudo renombrar el campo", str(e))
+                return
+            self._campos_editor = configuracion.obtener_campos(
+                self._normas_config, self._norma_seleccionada
+            )
+        elif anterior in self._campos_editor:
+            self._campos_editor[self._campos_editor.index(anterior)] = nuevo
+        self._editar_campo_editor(None)
 
     def _agregar_campo_editor(self):
         campo = self.entrada_nuevo_campo.get().strip().upper()

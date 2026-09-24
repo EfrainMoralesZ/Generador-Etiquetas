@@ -2,7 +2,7 @@
     "NOM-004-SE-2021": {
         "campos": [
             "MARCA",
-            "INSUMOS",
+            "INSUMOS/INGREDIENTES",
             "FORRO",
             "CUIDADO",
             "PAIS ORIGEN",
@@ -24,7 +24,7 @@
     "NOM-020-SCFI-1997": {
         "campos": [
             "MARCA",
-            "INSUMOS",
+            "INSUMOS/INGREDIENTES",
             "PAIS ORIGEN",
             "IMPORTADOR"
         ],
@@ -46,7 +46,7 @@
             "DESCRIPCION",
             "MEDIDAS",
             "LEYENDAS",
-            "INSUMOS",
+            "INSUMOS/INGREDIENTES",
             "PAIS ORIGEN",
             "CONTENIDO",
             "IMPORTADOR"
@@ -57,7 +57,7 @@
         "campos": [
             "MARCA",
             "DESCRIPCION",
-            "INGREDIENTES",
+            "INSUMOS/INGREDIENTES",
             "CONTENIDO",
             "LEYENDAS",
             "PAIS ORIGEN",
@@ -69,7 +69,7 @@
         "campos": [
             "MARCA",
             "CONTENIDO NETO",
-            "INSUMOS O INGREDIENTES",
+            "INSUMOS/INGREDIENTES",
             "LEYENDAS",
             "PAIS ORIGEN",
             "CONTENIDO",
@@ -80,7 +80,7 @@
     "NOM-142-SSA1 SCFI-2014": {
         "campos": [
             "MARCA",
-            "INGREDIENTES",
+            "INSUMOS/INGREDIENTES",
             "CONTENIDO",
             "LOTE",
             "IMPORTADOR"
@@ -90,7 +90,7 @@
     "NOM-051-SCFI SSA1-2010": {
         "campos": [
             "MARCA",
-            "INGREDIENTES",
+            "INSUMOS/INGREDIENTES",
             "CONTENIDO",
             "LOTE",
             "IMPORTADOR"

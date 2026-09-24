@@ -137,6 +137,31 @@ def mover_campo(config, nombre, campo, desplazamiento):
     return config
 
 
+def renombrar_campo(config, nombre, anterior, nuevo):
+    """Cambia el nombre de un campo conservando su posición en la lista."""
+    nuevo = (nuevo or "").strip().upper()
+    if not nuevo:
+        raise ValueError("El nombre del campo no puede estar vacío.")
+    campos = config.get(nombre, {}).get("campos", [])
+    if anterior not in campos:
+        raise KeyError(f"El campo '{anterior}' ya no existe en esta norma.")
+    if nuevo != anterior and nuevo in campos:
+        raise ValueError(f"El campo '{nuevo}' ya existe en esta norma.")
+    campos[campos.index(anterior)] = nuevo
+    return config
+
+
+def renombrar_campo_y_guardar(nombre, anterior, nuevo, config_path=CONFIG_PATH):
+    """Renombra un campo de una norma existente y lo escribe en el JSON.
+    Devuelve el config actualizado."""
+    config = cargar_config(config_path)
+    if nombre not in config:
+        raise KeyError(f"La norma '{nombre}' no existe.")
+    renombrar_campo(config, nombre, anterior, nuevo)
+    guardar_config(config, config_path)
+    return config
+
+
 def mover_campo_y_guardar(nombre, campo, desplazamiento, config_path=CONFIG_PATH):
     """Reordena un campo de una norma existente y lo escribe en el JSON.
     Devuelve el config actualizado."""

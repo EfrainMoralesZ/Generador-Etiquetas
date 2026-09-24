@@ -78,11 +78,6 @@ def _primer_valor(fila, columnas):
             return texto
     return ""
 
-def _antepone(prefijo, texto):
-    if texto.upper().startswith(prefijo.rstrip(": ").upper()):
-        return texto
-    return f"{prefijo}{texto}"
-
 #Reglas para anteponer titulos ej: HECHO EN... FORRO, TALLA, PAIS ORIGEN.
 def formatear_valor(campo, valor):
     if valor is None:
@@ -101,12 +96,7 @@ def formatear_valor(campo, valor):
     # ANTEPONER TALLA ANTES DEL TEXTO DE TALLA
     if campo_norm == "TALLA":
         return f"TALLA {texto}"
-    # EL CONTENIDO SE IMPRIME SOLO CON SU VALOR (ej. "50 ml"), SIN PREFIJO
-    # ANTEPONER "Ingredientes:" E "Importado por:" (como en la plantilla de asignaciones)
-    if campo_norm == "INGREDIENTES":
-        return _antepone("Ingredientes: ", texto)
-    if campo_norm == "IMPORTADOR":
-        return _antepone("Importado por: ", texto)
+    # CONTENIDO, INGREDIENTES E IMPORTADOR SE IMPRIMEN SOLO CON SU VALOR, SIN PREFIJO
     return texto
 
 def extraer_campos_etiqueta(fila, campos):
