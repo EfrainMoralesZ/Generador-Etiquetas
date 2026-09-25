@@ -101,7 +101,8 @@ def formatear_valor(campo, valor):
     # ANTEPONER TALLA ANTES DEL TEXTO DE TALLA
     if campo_norm == "TALLA":
         return f"TALLA {texto}"
-    if campo_norm == "INGREDIENTES":
+    # ANTEPONER INGREDIENTES (EN LA NORMA EL CAMPO SE LLAMA "INSUMOS/INGREDIENTES")
+    if campo_norm in ("INGREDIENTES", "INSUMOS/INGREDIENTES"):
         return _antepone("Ingredientes: ", texto)
     # CONTENIDO, IMPORTADOR SE IMPRIMEN SOLO CON SU VALOR, SIN PREFIJO
     return texto
