@@ -5,6 +5,7 @@ import re
 
 import pandas as pd
 
+from nom004 import NUMERO_NORMA as NUMERO_NOM004, Nom004Validador, cargar_catalogo as cargar_catalogo_fibras
 from plantilla_asignaciones import (
     MEMBRETE_PATH, calcular_plantilla, guardar_plantilla_docx, guardar_plantilla_pdf,
 )
@@ -220,6 +221,25 @@ def _filas_sin_codigo_formato(registros):
         if not (buscar_valor_columna(fila, COLUMNA_NORMA) or "").strip()
     ]
 
+def _revisar_nom004(registros):
+    """Revisa las reglas de la NOM-004 (insumo, forro y cuidado) en las filas
+    de esa norma. Devuelve {fila: (revision, observaciones)}; si alguna fila
+    trae observaciones no se genera nada del lote hasta corregir el Excel."""
+    validador = None
+    resultado = {}
+    for idx, fila in enumerate(registros, start=1):
+        if extraer_numero_norma(buscar_valor_columna(fila, COLUMNA_NORMA) or "") != NUMERO_NOM004:
+            continue
+        if validador is None:
+            validador = Nom004Validador(fibras=cargar_catalogo_fibras())
+        revision = validador.revisar(fila)
+        resultado[idx] = (revision, Nom004Validador.observaciones(revision))
+    return resultado
+
+def _filas_con_observaciones(revisiones):
+    """[(fila, observaciones)] de las filas que no cumplen alguna regla."""
+    return [(idx, obs) for idx, (_, obs) in revisiones.items() if obs]
+
 def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_PATH, json_dir=DEFAULT_JSON_DIR):
     """Analiza el Excel y arma un resumen (fila, EAN, marca, norma, campos, error)
     sin generar imágenes ni PDFs, para que el usuario verifique antes de generar."""
@@ -227,10 +247,12 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
     mapa_numero_a_norma = construir_mapa_numero_a_norma(config)
 
     registros, json_path = excel_a_json(excel_path, json_dir)
+    revisiones = _revisar_nom004(registros)
 
     detalle = []
     for idx, fila in enumerate(registros, start=1):
         item = _analizar_fila(fila, idx, mapa_numero_a_norma, config)
+        revision, observaciones = revisiones.get(idx, ([], []))
         detalle.append({
             "fila": item["fila"],
             "ean": item["ean"],
@@ -239,6 +261,8 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
             "norma": item["norma"],
             "campos": [c for c, _ in item["campos_texto"]],
             "error": item["error"],
+            "revision": revision,
+            "observaciones": observaciones,
         })
 
     return {
@@ -247,6 +271,7 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
         "detalle": detalle,
         "json_path": json_path,
         "filas_sin_codigo_formato": _filas_sin_codigo_formato(registros),
+        "filas_con_observaciones": _filas_con_observaciones(revisiones),
     }
 
 def _ruta_salida_unica(output_dir, nombre_base, nombres_usados):
@@ -296,6 +321,15 @@ def generar_etiquetas_desde_excel(
             f"Falta la columna '{COLUMNA_NORMA}' en la(s) fila(s): {filas_txt}{extra}. "
             "Esa columna es indispensable para saber qué norma y qué armado le corresponde a "
             "cada etiqueta, así que hay que completarla en todas las filas antes de generar."
+        )
+
+    filas_con_observaciones = _filas_con_observaciones(_revisar_nom004(registros))
+    if filas_con_observaciones:
+        filas_txt = ", ".join(str(f) for f, _ in filas_con_observaciones[:15])
+        extra = "…" if len(filas_con_observaciones) > 15 else ""
+        raise ValueError(
+            f"La(s) fila(s) {filas_txt}{extra} no cumplen las reglas de la NOM-004 (insumo, forro "
+            "o instrucciones de cuidado). Corrige el Excel y vuelve a subirlo antes de generar."
         )
 
     os.makedirs(output_dir, exist_ok=True)

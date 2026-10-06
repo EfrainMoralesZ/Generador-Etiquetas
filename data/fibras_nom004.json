@@ -1,0 +1,27 @@
+{
+    "naturales": [
+        "Algodón",
+        "Lana",
+        "Seda",
+        "Lino",
+        "Cáñamo",
+        "Yute",
+        "Ramio",
+        "Cashmere",
+        "Mohair",
+        "Alpaca",
+        "Angora"
+    ],
+    "quimicas": [
+        "Poliéster",
+        "Viscosa",
+        "Nylon",
+        "Poliamida",
+        "Acrílico",
+        "Elastano",
+        "Polipropileno",
+        "Acetato",
+        "Spandex",
+        "Lycra"
+    ]
+}

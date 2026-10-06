@@ -655,6 +655,8 @@ class GenerdorEtiquetas:
                 "a cada etiqueta, así que hay que completarla en todas las filas antes de poder "
                 "generar el lote."
             )
+        elif resultado.get("filas_con_observaciones"):
+            self._mostrar_observaciones_nom004(resultado)
         elif resultado["listas"] > 0:
             self.btn_generar.configure(state="normal")
             self._agregar_actividad(
@@ -667,6 +669,37 @@ class GenerdorEtiquetas:
                 "⚠️", "Sin filas válidas",
                 "Ninguna fila coincide con una norma configurada"
             )
+
+    def _mostrar_observaciones_nom004(self, resultado):
+        """Bloquea el lote y muestra por fila las reglas de la NOM-004 (✓ cumple,
+        ! no cumple) para que el usuario corrija el Excel y lo vuelva a subir."""
+        self.btn_generar.configure(state="disabled")
+        filas_obs = resultado["filas_con_observaciones"]
+        por_fila = {d["fila"]: d for d in resultado["detalle"]}
+
+        self._agregar_actividad(
+            "❌", "No cumple la NOM-004",
+            f"{len(filas_obs)} fila(s) con observaciones; corrige el Excel y vuelve a subirlo"
+        )
+        for fila, _ in filas_obs:
+            item = por_fila.get(fila, {})
+            lineas = [
+                f"{'✓' if r['ok'] else '!'} {r['columna']}: {r['mensaje']}"
+                for r in item.get("revision", [])
+            ]
+            self._agregar_actividad("⚠️", f"Fila {fila} · EAN {item.get('ean') or '—'}", "\n".join(lineas))
+
+        resumen = []
+        for fila, observaciones in filas_obs[:8]:
+            resumen.append(f"Fila {fila}:")
+            resumen += [f"  ! {o['columna']}: {o['mensaje']}" for o in observaciones]
+        if len(filas_obs) > 8:
+            resumen.append(f"… y {len(filas_obs) - 8} fila(s) más (ver Actividad reciente).")
+        messagebox.showerror(
+            "No cumple la NOM-004",
+            "No se generará ninguna etiqueta del lote hasta corregir el Excel y volver a subirlo.\n\n"
+            + "\n".join(resumen)
+        )
 
     def _analisis_fallido(self, mensaje):
         self.estado_pasos[1] = "pendiente"
