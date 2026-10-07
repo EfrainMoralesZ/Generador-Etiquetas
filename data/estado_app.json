@@ -43,6 +43,17 @@
       "total_filas": 52,
       "generadas": 52,
       "total_detalle": 52
+    },
+    {
+      "id": "BD_MTB_AIFA_xlsx_20261007132314",
+      "nombre_excel": "BD-MTB-AIFA.xlsx",
+      "fecha": "07/10/2026 · 13:23",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD-MTB-AIFA_20261007_132312",
+      "json_path": "data\\etiquetas\\BD-MTB-AIFA.json",
+      "detalle_path": "data\\lotes\\BD_MTB_AIFA_xlsx_20261007132314.jsonl",
+      "total_filas": 100,
+      "generadas": 9,
+      "total_detalle": 100
     }
   ]
 }

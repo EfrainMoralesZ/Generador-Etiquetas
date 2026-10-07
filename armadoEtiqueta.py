@@ -31,6 +31,17 @@ COLUMNAS_TIPO = ("TIPO DE ETIQUETA", "TIPO")
 # esa es la altura. Ver _altura_contenido.
 COLUMNA_MEDIDAS = "MEDIDAS"
 
+NUMERO_NOM050 = 50
+# En la NOM-050 el CONTENIDO lleva "CONTENIDO NETO" si trae unidad de masa o
+# volumen y "CONTENIDO" si no (piezas, latas...). La unidad puede venir pegada
+# al número ("500ml"); [^\W\d_] = cualquier letra, así la "L" de "LATA" no
+# cuenta como litro.
+_UNIDADES_CONTENIDO_NETO = re.compile(
+    r"(?<![^\W\d_])(MILILITROS?|MLS?|LITROS?|LTS?|L|GRAMOS?|GRS?|G|KILOGRAMOS?|KILOS?|KGS?|K)(?![^\W\d_])",
+    re.IGNORECASE,
+)
+_LEYENDA_CONTENIDO = re.compile(r"^CONTENIDO(\s+NETO)?\s*:?\s*", re.IGNORECASE)
+
 _CARACTERES_INVALIDOS = re.compile(r'[<>:"/\\|?*]')
 
 # pandas renombra los encabezados repetidos como "MEDIDAS.1", "MEDIDAS.2"...
@@ -106,7 +117,15 @@ def formatear_valor(campo, valor):
     if campo_norm in ("INGREDIENTES", "INSUMOS/INGREDIENTES"):
         return _antepone("Ingredientes: ", texto)
     # CONTENIDO, IMPORTADOR SE IMPRIMEN SOLO CON SU VALOR, SIN PREFIJO
+    # (salvo CONTENIDO en la NOM-050, ver formatear_contenido)
     return texto
+
+def formatear_contenido(texto):
+    """Leyenda del CONTENIDO en la NOM-050. Si la celda ya trae la leyenda se
+    quita y se pone la correcta, sin repetirla."""
+    valor = _LEYENDA_CONTENIDO.sub("", texto.strip()).strip()
+    prefijo = "CONTENIDO NETO " if _UNIDADES_CONTENIDO_NETO.search(valor) else "CONTENIDO "
+    return prefijo + valor
 
 def extraer_campos_etiqueta(fila, campos):
     """Devuelve la lista de (campo, texto_formateado) para los campos con valor."""
@@ -119,7 +138,8 @@ def extraer_campos_etiqueta(fila, campos):
     return resultado
 
 def excel_a_json(excel_path, carpeta_salida=DEFAULT_JSON_DIR):
-    """Lee el Excel y lo guarda de inmediato como .json en `carpeta_salida`
+    """Lee el Excel y lo guarda de inmediato como .json en `carpet
+    a_salida`
     (se necesita ahí desde la subida, no solo tras generar, para poder
     inspeccionar cómo queda extraído el texto). Si el usuario nunca genera
     las etiquetas con este archivo, la app se encarga de borrar ese .json
@@ -197,6 +217,11 @@ def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
     fuera_de_etiqueta = COLUMNAS_TIPO if medidas_en_etiqueta else COLUMNAS_TIPO + (COLUMNA_MEDIDAS,)
     campos = [c for c in config[norma]["campos"] if c.strip().upper() not in fuera_de_etiqueta]
     campos_texto = extraer_campos_etiqueta(fila, campos)
+    if numero == NUMERO_NOM050:
+        campos_texto = [
+            (campo, formatear_contenido(texto) if campo.strip().upper() == "CONTENIDO" else texto)
+            for campo, texto in campos_texto
+        ]
 
     item["norma"] = norma
     item["campos_texto"] = campos_texto

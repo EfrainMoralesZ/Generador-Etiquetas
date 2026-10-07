@@ -256,6 +256,7 @@ Los **demás** tipos de error de fila (código que no coincide con ninguna norma
 | `TALLA` | `"TALLA {valor}"` | `M` → `TALLA M` |
 | `FORRO` | `"FORRO {valor}"` (mayúsculas) | `ALGODON` → `FORRO ALGODON` |
 | `CONTENIDO` | Sin prefijo: se imprime solo el valor, en negrita y más grande | `50 ml` → `50 ml` |
+| `CONTENIDO` (solo NOM-050) | `formatear_contenido`: `"CONTENIDO NETO {valor}"` si trae ml, l, lt, litros, g, gr, gramos, kg, kilos o k; si no, `"CONTENIDO {valor}"`. Si la celda ya trae la leyenda se reemplaza por la correcta | `500ml` → `CONTENIDO NETO 500ml`; `12 pzas` → `CONTENIDO 12 pzas` |
 
 > **Nota técnica:** la condición para `FORRO` está escrita como `if campo_norm in ("FORRO"):`. Al faltarle la coma final, Python no interpreta `("FORRO")` como una tupla de un elemento sino como el string `"FORRO"` plano, así que `in` hace **verificación de substring**, no de igualdad — el bloque se dispara para cualquier `campo_norm` que sea substring de `"FORRO"` (`"FOR"`, `"ORRO"`, `"R"`, etc.), no solo para el campo exactamente llamado `FORRO`. En la práctica no suele causar problemas porque los nombres de campo de las normas configuradas no chocan con substrings de "FORRO", pero conviene tenerlo presente si se agrega algún campo con un nombre corto parecido. La forma correcta sería `campo_norm == "FORRO"` o `campo_norm in ("FORRO",)`.
 

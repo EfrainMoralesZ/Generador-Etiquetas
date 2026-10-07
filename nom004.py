@@ -12,8 +12,21 @@ NUMERO_NORMA = 4
 # Catálogo editable de fibras: si no existe se crea con las fibras iniciales.
 CATALOGO_FIBRAS_PATH = os.path.join("data", "fibras_nom004.json")
 
-FIBRAS_NATURALES = ["Algodón", "Lana", "Seda", "Lino", "Cáñamo", "Yute", "Ramio", "Cashmere", "Mohair", "Alpaca", "Angora"]
-FIBRAS_QUIMICAS = ["Poliéster", "Viscosa", "Nylon", "Poliamida", "Acrílico", "Elastano", "Polipropileno", "Acetato", "Spandex", "Lycra"]
+FIBRAS_NATURALES = [
+    "Seda", "Tasar", "Muga", "Eri", "Anaphe", "Biso", "Lana", "Alpaca", "Angora", "Cashmere", "Camello", "Guanaco",
+    "Llama", "Mohair", "Vicuña", "Yak", "Toro", "Castor", "Ciervo", "Cabra", "Caballo", "Conejo", "Liebre", "Nutria",
+    "Foca", "Rata almizclera", "Reno", "Visón", "Marta", "Sable", "Comadreja", "Oso", "Armiño", "Zorro del ártico",
+    "Algodón", "Akund", "Kapok", "Cáñamo", "Muo", "Yute", "Kenaf", "Lino", "Ramio", "Rosella", "Sunn", "Ureña",
+    "Abutilón", "Punga", "Adelfa azuloso", "Ortiga", "Bambú", "Ricino", "Abacá", "Alfa", "Áloe", "Fique", "Henequén",
+    "Maguey", "Lino de Nueva Zelanda", "Sisal", "Tampico", "Ixtle de palma", "Hoja de piña", "Pita", "Fibra de junco",
+    "Coco", "Asbesto", "Amianto",
+]
+FIBRAS_QUIMICAS = [
+    "Cupro", "Lyocell", "Modal", "Viscosa", "Rayón", "Acetato", "Triacetato", "Alginato", "Acrílico", "Aramida",
+    "Clorofibra", "Elastano", "Elastodieno", "Fluorofibra", "Modacrílica", "Poliamida", "Nylon", "Poliéster",
+    "Polietileno", "Poliimida", "Polipropileno", "Vidrio", "Vinilo", "Carbón", "Metal", "Elastomultiéster",
+    "Elasterell-p", "Polilactida", "PLA", "Elastolefin", "Lastol", "Spandex", "Lycra",
+]
 
 COLUMNAS_INSUMO = ["INSUMOS", "INSUMO PRINCIPAL", "INSUMO PRICIPAL", "INSUMOS/INGREDIENTES"]
 COLUMNAS_FORRO = ["FORRO"]
@@ -85,8 +98,10 @@ class Nom004Validador:
             if columna is not None and not self._no_aplica(valor):
                 revision += [{"columna": columna, **r} for r in self.revisar_composicion(valor, que)]
 
+        # El cuidado es opcional (como la talla): si la celda viene vacía no se
+        # revisa y la etiqueta se imprime sin él; si trae texto, debe cumplir.
         columna, valor = self._celda(fila, COLUMNAS_CUIDADO)
-        if columna is not None:
+        if columna is not None and not self._no_aplica(valor):
             revision += [{"columna": columna, **r} for r in self.revisar_cuidado(valor)]
 
         return revision
