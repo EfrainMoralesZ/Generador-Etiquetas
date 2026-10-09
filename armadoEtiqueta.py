@@ -5,7 +5,11 @@ import re
 
 import pandas as pd
 
-from nom004 import NUMERO_NORMA as NUMERO_NOM004, Nom004Validador, cargar_catalogo as cargar_catalogo_fibras
+from nom004 import (
+    NUMERO_NORMA as NUMERO_NOM004, Nom004Validador, cargar_adicionales as cargar_adicionales_cuidado,
+    cargar_catalogo as cargar_catalogo_fibras,
+)
+from nom050 import NUMERO_NORMA as NUMERO_NOM050, formatear_contenido
 from plantilla_asignaciones import (
     MEMBRETE_PATH, calcular_plantilla, guardar_plantilla_docx, guardar_plantilla_pdf,
 )
@@ -30,17 +34,6 @@ COLUMNAS_TIPO = ("TIPO DE ETIQUETA", "TIPO")
 # (van dentro de la etiqueta en las normas que las llevan); si trae una sola,
 # esa es la altura. Ver _altura_contenido.
 COLUMNA_MEDIDAS = "MEDIDAS"
-
-NUMERO_NOM050 = 50
-# En la NOM-050 el CONTENIDO lleva "CONTENIDO NETO" si trae unidad de masa o
-# volumen y "CONTENIDO" si no (piezas, latas...). La unidad puede venir pegada
-# al número ("500ml"); [^\W\d_] = cualquier letra, así la "L" de "LATA" no
-# cuenta como litro.
-_UNIDADES_CONTENIDO_NETO = re.compile(
-    r"(?<![^\W\d_])(MILILITROS?|MLS?|LITROS?|LTS?|L|GRAMOS?|GRS?|G|KILOGRAMOS?|KILOS?|KGS?|K)(?![^\W\d_])",
-    re.IGNORECASE,
-)
-_LEYENDA_CONTENIDO = re.compile(r"^CONTENIDO(\s+NETO)?\s*:?\s*", re.IGNORECASE)
 
 _CARACTERES_INVALIDOS = re.compile(r'[<>:"/\\|?*]')
 
@@ -117,15 +110,8 @@ def formatear_valor(campo, valor):
     if campo_norm in ("INGREDIENTES", "INSUMOS/INGREDIENTES"):
         return _antepone("Ingredientes: ", texto)
     # CONTENIDO, IMPORTADOR SE IMPRIMEN SOLO CON SU VALOR, SIN PREFIJO
-    # (salvo CONTENIDO en la NOM-050, ver formatear_contenido)
+    # (salvo CONTENIDO en la NOM-050, ver nom050.formatear_contenido)
     return texto
-
-def formatear_contenido(texto):
-    """Leyenda del CONTENIDO en la NOM-050. Si la celda ya trae la leyenda se
-    quita y se pone la correcta, sin repetirla."""
-    valor = _LEYENDA_CONTENIDO.sub("", texto.strip()).strip()
-    prefijo = "CONTENIDO NETO " if _UNIDADES_CONTENIDO_NETO.search(valor) else "CONTENIDO "
-    return prefijo + valor
 
 def extraer_campos_etiqueta(fila, campos):
     """Devuelve la lista de (campo, texto_formateado) para los campos con valor."""
@@ -256,7 +242,7 @@ def _revisar_nom004(registros):
         if extraer_numero_norma(buscar_valor_columna(fila, COLUMNA_NORMA) or "") != NUMERO_NOM004:
             continue
         if validador is None:
-            validador = Nom004Validador(fibras=cargar_catalogo_fibras())
+            validador = Nom004Validador(fibras=cargar_catalogo_fibras(), adicionales=cargar_adicionales_cuidado())
         revision = validador.revisar(fila)
         resultado[idx] = (revision, Nom004Validador.observaciones(revision))
     return resultado

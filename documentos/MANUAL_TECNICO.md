@@ -40,11 +40,18 @@ Generador Etiquetas/
 ├── armadoEtiqueta.py        # Lógica de negocio: Excel → validación → PDF + Word
 ├── plantilla_asignaciones.py # Plantilla de impresión: hoja membretada con la etiqueta (PDF + Word)
 ├── configuracion.py         # CRUD de normas sobre data/config_etiquetas.json
+├── nom004.py                # Reglas de la NOM-004 (insumo, forro, cuidado)
+├── nom050.py                # Reglas de la NOM-050 (leyenda del CONTENIDO)
+├── catalogos.py             # Lectura/escritura de los catálogos editables de las normas
+├── reglas_normas.py         # Qué reglas y catálogos tiene cada norma (para la pantalla Configuración)
 ├── build_exe.bat            # Script de empaquetado a ejecutable de Windows
 ├── requierements             # Dependencias pip (congeladas por versión)
 ├── img/                      # icono.ico (ejecutable) y Membrete.jpg (fondo de cada hoja, se lee en runtime)
 └── data/
     ├── config_etiquetas.json # Catálogo de normas y sus campos (editable desde "Configuración")
+    ├── fibras_nom004.json    # Catálogo de fibras naturales y químicas (NOM-004)
+    ├── cuidado_nom004.json   # Frases adicionales de cuidado (NOM-004)
+    ├── unidades_nom050.json  # Unidades que llevan "CONTENIDO NETO" (NOM-050)
     ├── estado_app.json       # Manifiesto liviano de todos los lotes generados
     ├── lotes/                # Un .jsonl por lote, con el detalle de cada etiqueta generada
     └── etiquetas/             # Excel→JSON crudo de cada archivo subido (ver ciclo de vida abajo)
@@ -215,6 +222,14 @@ Cada fila tiene cuatro acciones: 👁 vista previa (`_previsualizar_pdf`, render
 #### Página Configuración
 `_crear_pagina_configuracion` + `_refrescar_lista_normas` / `_refrescar_editor_norma`. Panel izquierdo con la lista de normas (clic para seleccionar), panel derecho como editor: agregar/quitar campos (`_agregar_campo_editor` / `_quitar_campo_editor`), crear norma nueva (`_iniciar_nueva_norma`), guardar (`_guardar_norma_editor`, delega la validación y persistencia a `configuracion.py`) o eliminar (`_eliminar_norma_editor`, con confirmación).
 
+El editor de una norma existente tiene tres pestañas (`CTkTabview`):
+
+- **Campos**: orientación y lista de campos, como se describió arriba.
+- **Reglas** (`_renderizar_reglas_editor`): las validaciones que bloquean el lote y el formato que se aplica a cada campo de la norma, tomados de `reglas_normas.py`. Es solo lectura: las reglas viven en código.
+- **Catálogos** (`_renderizar_catalogos_editor`, solo si la norma tiene alguno): selector de catálogo, búsqueda, lista (un `tk.Listbox` nativo; una fila de widgets CTk por elemento tardaba segundos con ~70 fibras) y agregar / editar (doble clic) / quitar (con confirmación). Cada cambio se guarda al momento.
+
+Las pestañas Reglas y Catálogos se arman al abrirlas (`_cambiar_pestana_editor`). Una norma nueva solo muestra sus campos: sus reglas dependen de su número y se ven una vez guardada.
+
 #### Funciones a nivel de módulo (fuera de la clase)
 Gestión del manifiesto de lotes: `_slug`, `_ruta_lote_unica`, `_guardar_detalle_lote`, `_migrar_lote_a_jsonl`, `_cargar_manifiesto_lotes`, `_guardar_manifiesto_lotes`.
 
@@ -229,6 +244,20 @@ Capa delgada sobre `data/config_etiquetas.json`, sin ninguna dependencia de Tkin
 | `validar_nombre_norma(nombre, config, excluir)` | Exige el patrón `NOM-<número>` (el mismo regex que usa `armadoEtiqueta.construir_mapa_numero_a_norma`, para que una norma nueva sea realmente reconocible) y **rechaza que dos normas compartan el mismo número** — si eso pasara, el generador solo podría usar una de las dos, y silenciosamente ignoraría la otra |
 | `agregar_norma` / `eliminar_norma` / `actualizar_campos_norma` | Mutaciones sobre el diccionario en memoria (no persisten solas — hay que llamar `guardar_config` después) |
 | `agregar_campo` / `eliminar_campo` | Helpers de más bajo nivel, no usados actualmente por la UI (que maneja la lista de campos completa vía `actualizar_campos_norma`), disponibles para uso programático |
+
+### 6.4 Reglas y catálogos de las normas (`nom004.py`, `nom050.py`, `catalogos.py`, `reglas_normas.py`)
+
+Las reglas de cada norma se programan en su propio módulo (`nom004.py`, `nom050.py`) y se identifican por el número de la norma, igual que el generador. Las listas que usan esas reglas son **catálogos editables** en JSON (`{"clave": [valores]}`), que se crean con sus valores iniciales si no existen:
+
+| Norma | Catálogo | Archivo / clave | Lo usa |
+|---|---|---|---|
+| NOM-004 | Fibras naturales y químicas | `fibras_nom004.json` / `naturales`, `quimicas` | Validación de insumo y forro |
+| NOM-004 | Frases adicionales de cuidado | `cuidado_nom004.json` / `adicionales` | Se permiten en cualquier parte del cuidado sin afectar el orden |
+| NOM-050 | Unidades de contenido neto | `unidades_nom050.json` / `contenido_neto` | `nom050.formatear_contenido` |
+
+- `catalogos.py`: `cargar_lista`, `guardar_lista`, `agregar_valor`, `renombrar_valor`, `eliminar_valor`. Rechaza vacíos y repetidos (sin importar mayúsculas) y escribe con temporal + reemplazo, como `configuracion.guardar_config`.
+- `reglas_normas.py`: registro por número de norma de los catálogos (`CATALOGOS`) y de la descripción de las validaciones (`VALIDACIONES`) y formatos de campo (`formatos_de`) que muestra la pestaña Reglas. **Si se programa una regla nueva, hay que describirla aquí** para que aparezca en Configuración.
+- El generador relee los catálogos en cada análisis (`nom050` reconstruye su regex solo cuando cambia la fecha del archivo), así que los cambios hechos en Configuración aplican sin reiniciar la app.
 
 ---
 
@@ -256,7 +285,7 @@ Los **demás** tipos de error de fila (código que no coincide con ninguna norma
 | `TALLA` | `"TALLA {valor}"` | `M` → `TALLA M` |
 | `FORRO` | `"FORRO {valor}"` (mayúsculas) | `ALGODON` → `FORRO ALGODON` |
 | `CONTENIDO` | Sin prefijo: se imprime solo el valor, en negrita y más grande | `50 ml` → `50 ml` |
-| `CONTENIDO` (solo NOM-050) | `formatear_contenido`: `"CONTENIDO NETO {valor}"` si trae ml, l, lt, litros, g, gr, gramos, kg, kilos o k; si no, `"CONTENIDO {valor}"`. Si la celda ya trae la leyenda se reemplaza por la correcta | `500ml` → `CONTENIDO NETO 500ml`; `12 pzas` → `CONTENIDO 12 pzas` |
+| `CONTENIDO` (solo NOM-050) | `nom050.formatear_contenido`: `"CONTENIDO NETO {valor}"` si trae una unidad del catálogo `unidades_nom050.json` (ml, l, lt, litros, g, gr, gramos, kg, kilos, k...); si no, `"CONTENIDO {valor}"`. Si la celda ya trae la leyenda se reemplaza por la correcta | `500ml` → `CONTENIDO NETO 500ml`; `12 pzas` → `CONTENIDO 12 pzas` |
 
 > **Nota técnica:** la condición para `FORRO` está escrita como `if campo_norm in ("FORRO"):`. Al faltarle la coma final, Python no interpreta `("FORRO")` como una tupla de un elemento sino como el string `"FORRO"` plano, así que `in` hace **verificación de substring**, no de igualdad — el bloque se dispara para cualquier `campo_norm` que sea substring de `"FORRO"` (`"FOR"`, `"ORRO"`, `"R"`, etc.), no solo para el campo exactamente llamado `FORRO`. En la práctica no suele causar problemas porque los nombres de campo de las normas configuradas no chocan con substrings de "FORRO", pero conviene tenerlo presente si se agrega algún campo con un nombre corto parecido. La forma correcta sería `campo_norm == "FORRO"` o `campo_norm in ("FORRO",)`.
 

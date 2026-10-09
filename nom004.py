@@ -7,10 +7,15 @@ import re
 import unicodedata
 from typing import Any
 
+from catalogos import cargar_lista
+
 NUMERO_NORMA = 4
 
 # Catálogo editable de fibras: si no existe se crea con las fibras iniciales.
 CATALOGO_FIBRAS_PATH = os.path.join("data", "fibras_nom004.json")
+# Frases adicionales de cuidado (editables): se permiten en cualquier parte del
+# texto y no cuentan para el orden de las instrucciones.
+CATALOGO_CUIDADO_PATH = os.path.join("data", "cuidado_nom004.json")
 
 FIBRAS_NATURALES = [
     "Seda", "Tasar", "Muga", "Eri", "Anaphe", "Biso", "Lana", "Alpaca", "Angora", "Cashmere", "Camello", "Guanaco",
@@ -72,6 +77,11 @@ def cargar_catalogo(ruta: str = CATALOGO_FIBRAS_PATH) -> list[str]:
     return [str(fibra).strip() for lista in catalogo.values() for fibra in lista if str(fibra).strip()]
 
 
+def cargar_adicionales(ruta: str = CATALOGO_CUIDADO_PATH) -> list[str]:
+    """Frases adicionales de cuidado del catálogo editable (se crea si no existe)."""
+    return cargar_lista(ruta, "adicionales", ADICIONALES)
+
+
 def normalizar(texto: str) -> str:
     """Minúsculas y sin acentos (ñ -> n)."""
     sin_acentos = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
@@ -83,9 +93,11 @@ def formato_porcentaje(valor: float) -> str:
 
 
 class Nom004Validador:
-    def __init__(self, fibras: list[str] | None = None) -> None:
-        # En producción pásale el catálogo editable (cargar_catalogo); sin él usa las fibras iniciales.
+    def __init__(self, fibras: list[str] | None = None, adicionales: list[str] | None = None) -> None:
+        # En producción pásale los catálogos editables (cargar_catalogo / cargar_adicionales);
+        # sin ellos usa las listas iniciales.
         self.fibras = fibras if fibras is not None else FIBRAS_NATURALES + FIBRAS_QUIMICAS
+        self.adicionales = adicionales if adicionales is not None else ADICIONALES
 
     # ---------- fila completa ----------
 
@@ -188,8 +200,10 @@ class Nom004Validador:
             return [{"regla": "Instrucciones completas", "ok": False, "mensaje": "Faltan las instrucciones de cuidado."}]
 
         normalizado = normalizar(texto)
-        for adicional in ADICIONALES:
+        for adicional in self.adicionales:
             frase = normalizar(adicional)
+            if not frase:
+                continue
             normalizado = normalizado.replace(frase, " " * len(frase))  # conserva posiciones
 
         posiciones: dict[str, int] = {}

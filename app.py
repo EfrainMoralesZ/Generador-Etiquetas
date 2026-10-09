@@ -7,6 +7,7 @@ import threading
 from datetime import datetime
 
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image
 import fitz  # PyMuPDF
@@ -18,7 +19,10 @@ except Exception:
     TkinterDnD = None
 
 from armadoEtiqueta import generar_etiquetas_desde_excel, previsualizar_etiquetas_desde_excel
+import catalogos
 import configuracion
+import reglas_normas
+from nom004 import normalizar
 
 APP_VERSION = "1.0.0"
 ESTADO_PATH = os.path.join("data", "estado_app.json")
@@ -180,6 +184,11 @@ class GenerdorEtiquetas:
         self._campos_editor = []
         self._campo_editando = None
         self._orientacion_editor = configuracion.ORIENTACION_DEFECTO
+        self._tab_editor = "Campos"
+        self._catalogo_editor = None
+        self._valor_catalogo_editando = None
+        self._filtro_catalogo = ""
+        self._filtro_catalogo_after_id = None
 
         self.root = ctk.CTk()
         self.root.title("Generador de Etiquetas")
@@ -1423,7 +1432,7 @@ class GenerdorEtiquetas:
             header, text="⚙️  Configuración de normas", font=FONT_TITLE, text_color=STYLE["texto_oscuro"]
         ).pack(anchor="w")
         ctk.CTkLabel(
-            header, text="Administra los campos que lleva cada norma al generar las etiquetas.",
+            header, text="Administra los campos, las reglas y los catálogos de cada norma.",
             font=FONT_LABEL, text_color=STYLE["texto_secundario"]
         ).pack(anchor="w", pady=(4, 0))
 
@@ -1486,9 +1495,16 @@ class GenerdorEtiquetas:
 
         for nombre in normas:
             campos = configuracion.obtener_campos(self._normas_config, nombre)
+            resumen = [f"{len(campos)} campo(s)"]
+            num_reglas = reglas_normas.cuenta_reglas(nombre)
+            if num_reglas:
+                resumen.append(f"{num_reglas} regla(s)")
+            num_catalogos = len(reglas_normas.catalogos_de(nombre))
+            if num_catalogos:
+                resumen.append(f"{num_catalogos} catálogo(s)")
             seleccionada = nombre == self._norma_seleccionada
             ctk.CTkButton(
-                self.lista_normas_frame, text=f"{nombre}\n{len(campos)} campo(s)",
+                self.lista_normas_frame, text=f"{nombre}\n{' · '.join(resumen)}",
                 anchor="w", font=FONT_SMALL, height=48, corner_radius=8,
                 fg_color=STYLE["surface_alt"] if seleccionada else "transparent",
                 hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
@@ -1501,6 +1517,9 @@ class GenerdorEtiquetas:
         self._campos_editor = configuracion.obtener_campos(self._normas_config, nombre)
         self._campo_editando = None
         self._orientacion_editor = configuracion.obtener_orientacion(self._normas_config, nombre)
+        self._catalogo_editor = None
+        self._valor_catalogo_editando = None
+        self._filtro_catalogo = ""
         self._refrescar_lista_normas()
         self._refrescar_editor_norma()
 
@@ -1542,26 +1561,8 @@ class GenerdorEtiquetas:
                 text_color=STYLE["texto_oscuro"], anchor="w"
             ).pack(fill="x", pady=(4, 16))
 
-        ctk.CTkLabel(
-            contenido, text="Orientación de impresión", font=FONT_SMALL,
-            text_color=STYLE["texto_secundario"]
-        ).pack(anchor="w")
-        self.segmented_orientacion = ctk.CTkSegmentedButton(
-            contenido, values=["Vertical", "Horizontal"],
-            font=FONT_LABEL, height=34,
-            fg_color=STYLE["fondo"], selected_color=STYLE["primario"],
-            selected_hover_color=STYLE["primario_hover"], unselected_color=STYLE["fondo"],
-            unselected_hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
-            command=self._cambiar_orientacion_editor
-        )
-        self.segmented_orientacion.set(
-            "Horizontal" if self._orientacion_editor == "horizontal" else "Vertical"
-        )
-        self.segmented_orientacion.pack(fill="x", pady=(4, 16))
-
-        # Botones y fila de "agregar campo" se anclan abajo (side="bottom")
-        # para que sigan visibles aunque la lista de campos tenga muchas
-        # filas; la lista de campos, en medio, es la que scrollea.
+        # Botones anclados abajo (side="bottom") para que sigan visibles
+        # aunque el contenido de en medio crezca; ese es el que scrollea.
         botones = ctk.CTkFrame(contenido, fg_color="transparent")
         botones.pack(side="bottom", fill="x")
         ctk.CTkButton(
@@ -1586,8 +1587,50 @@ class GenerdorEtiquetas:
                 corner_radius=8, command=self._eliminar_norma_editor
             ).pack(side="right")
 
-        agregar_fila = ctk.CTkFrame(contenido, fg_color="transparent")
-        agregar_fila.pack(side="bottom", fill="x", pady=(0, 20))
+        # Una norma nueva solo tiene campos; sus reglas y catálogos dependen de
+        # su número, así que se ven una vez guardada.
+        if self._creando_norma:
+            panel_campos = contenido
+        else:
+            pestanas = ["Campos", "Reglas"]
+            if reglas_normas.catalogos_de(self._norma_seleccionada):
+                pestanas.append("Catálogos")
+            if self._tab_editor not in pestanas:
+                self._tab_editor = "Campos"
+            self.tabs_editor = ctk.CTkTabview(
+                contenido, fg_color=STYLE["surface"], border_width=0, anchor="nw",
+                segmented_button_fg_color=STYLE["fondo"],
+                segmented_button_selected_color=STYLE["primario"],
+                segmented_button_selected_hover_color=STYLE["primario_hover"],
+                segmented_button_unselected_color=STYLE["fondo"],
+                segmented_button_unselected_hover_color=STYLE["surface_alt"],
+                text_color=STYLE["texto_oscuro"], command=self._cambiar_pestana_editor
+            )
+            self.tabs_editor.pack(fill="both", expand=True, pady=(0, 16))
+            for pestana in pestanas:
+                self.tabs_editor.add(pestana)
+            self.tabs_editor.set(self._tab_editor)
+            panel_campos = self.tabs_editor.tab("Campos")
+
+        ctk.CTkLabel(
+            panel_campos, text="Orientación de impresión", font=FONT_SMALL,
+            text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w")
+        self.segmented_orientacion = ctk.CTkSegmentedButton(
+            panel_campos, values=["Vertical", "Horizontal"],
+            font=FONT_LABEL, height=34,
+            fg_color=STYLE["fondo"], selected_color=STYLE["primario"],
+            selected_hover_color=STYLE["primario_hover"], unselected_color=STYLE["fondo"],
+            unselected_hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
+            command=self._cambiar_orientacion_editor
+        )
+        self.segmented_orientacion.set(
+            "Horizontal" if self._orientacion_editor == "horizontal" else "Vertical"
+        )
+        self.segmented_orientacion.pack(fill="x", pady=(4, 16))
+
+        agregar_fila = ctk.CTkFrame(panel_campos, fg_color="transparent")
+        agregar_fila.pack(side="bottom", fill="x", pady=(0, 20 if self._creando_norma else 4))
         self.entrada_nuevo_campo = ctk.CTkEntry(
             agregar_fila, placeholder_text="Nombre del campo (ej. TALLA)", font=FONT_LABEL, height=34
         )
@@ -1601,13 +1644,338 @@ class GenerdorEtiquetas:
         ).pack(side="right")
 
         ctk.CTkLabel(
-            contenido, text="Campos que lleva esta etiqueta", font=FONT_SMALL,
+            panel_campos, text="Campos que lleva esta etiqueta", font=FONT_SMALL,
             text_color=STYLE["texto_secundario"]
         ).pack(anchor="w")
 
-        self.lista_campos_frame = ctk.CTkScrollableFrame(contenido, fg_color="transparent")
+        self.lista_campos_frame = ctk.CTkScrollableFrame(panel_campos, fg_color="transparent")
         self.lista_campos_frame.pack(fill="both", expand=True, pady=(6, 10))
         self._renderizar_campos_editor()
+
+        if not self._creando_norma:
+            self._cambiar_pestana_editor()
+
+    def _cambiar_pestana_editor(self):
+        """Las pestañas Reglas y Catálogos se arman al abrirlas: así las
+        reglas reflejan los campos actuales y la lista de un catálogo largo
+        no se dibuja cada vez que se selecciona la norma."""
+        self._tab_editor = self.tabs_editor.get()
+        if self._tab_editor == "Reglas":
+            self._renderizar_reglas_editor()
+        elif self._tab_editor == "Catálogos":
+            self._renderizar_catalogos_editor()
+
+    @staticmethod
+    def _ajustar_al_ancho(contenedor, etiquetas, margen=40):
+        """Ajusta el wraplength de `etiquetas` al ancho de `contenedor` (en
+        CTk el texto no se reacomoda solo al cambiar el tamaño)."""
+        ultimo = {"ancho": None}
+
+        def ajustar(evento):
+            if evento.width == ultimo["ancho"]:
+                return
+            ultimo["ancho"] = evento.width
+            escala = ctk.ScalingTracker.get_widget_scaling(contenedor)
+            for etiqueta in etiquetas:
+                if etiqueta.winfo_exists():
+                    etiqueta.configure(wraplength=max(160, int(evento.width / escala) - margen))
+
+        contenedor.bind("<Configure>", ajustar, add="+")
+
+    def _renderizar_reglas_editor(self):
+        panel = self.tabs_editor.tab("Reglas")
+        self._limpiar_frame(panel)
+        lista = ctk.CTkScrollableFrame(panel, fg_color="transparent")
+        lista.pack(fill="both", expand=True)
+        textos = []
+
+        def seccion(titulo, subtitulo):
+            ctk.CTkLabel(
+                lista, text=titulo, font=("Segoe UI", 13, "bold"), text_color=STYLE["texto_oscuro"], anchor="w"
+            ).pack(fill="x", pady=(10, 0))
+            sub = ctk.CTkLabel(
+                lista, text=subtitulo, font=FONT_TINY, text_color=STYLE["texto_secundario"],
+                anchor="w", justify="left", wraplength=480
+            )
+            sub.pack(fill="x", pady=(0, 6))
+            textos.append(sub)
+
+        def tarjeta(titulo, descripcion):
+            card = ctk.CTkFrame(lista, fg_color=STYLE["fondo"], corner_radius=8)
+            card.pack(fill="x", pady=3)
+            ctk.CTkLabel(
+                card, text=titulo, font=("Segoe UI", 11, "bold"), text_color=STYLE["texto_oscuro"],
+                anchor="w", justify="left"
+            ).pack(fill="x", padx=12, pady=(8, 0))
+            texto = ctk.CTkLabel(
+                card, text=descripcion, font=FONT_TINY, text_color=STYLE["texto_secundario"],
+                anchor="w", justify="left", wraplength=480
+            )
+            texto.pack(fill="x", padx=12, pady=(2, 8))
+            textos.append(texto)
+
+        validaciones = reglas_normas.validaciones_de(self._norma_seleccionada)
+        formatos = reglas_normas.formatos_de(self._norma_seleccionada, self._campos_editor)
+
+        if validaciones:
+            seccion(
+                "Validaciones",
+                "Se revisan al analizar el Excel. Si alguna fila no cumple, no se genera ninguna "
+                "etiqueta del lote hasta corregirlo."
+            )
+            for titulo, descripcion in validaciones:
+                tarjeta(titulo, descripcion)
+        if formatos:
+            seccion("Formato al imprimir", "Cómo se escribe cada campo de esta norma en la etiqueta.")
+            for campo, descripcion in formatos:
+                tarjeta(campo, descripcion)
+        if not validaciones and not formatos:
+            sin_reglas = ctk.CTkLabel(
+                lista, text="Esta norma no tiene reglas especiales: sus campos se imprimen tal como "
+                            "vienen en el Excel.",
+                font=FONT_SMALL, text_color=STYLE["texto_secundario"], anchor="w", justify="left",
+                wraplength=480
+            )
+            sin_reglas.pack(fill="x", pady=10)
+            textos.append(sin_reglas)
+
+        self._ajustar_al_ancho(lista, textos)
+
+    def _catalogo_actual(self):
+        lista = reglas_normas.catalogos_de(self._norma_seleccionada)
+        return next((c for c in lista if c["id"] == self._catalogo_editor), lista[0])
+
+    def _renderizar_catalogos_editor(self):
+        panel = self.tabs_editor.tab("Catálogos")
+        self._limpiar_frame(panel)
+        lista = reglas_normas.catalogos_de(self._norma_seleccionada)
+        catalogo = self._catalogo_actual()
+        self._catalogo_editor = catalogo["id"]
+
+        if len(lista) > 1:
+            selector = ctk.CTkSegmentedButton(
+                panel, values=[c["titulo"] for c in lista], font=FONT_SMALL, height=32,
+                fg_color=STYLE["fondo"], selected_color=STYLE["primario"],
+                selected_hover_color=STYLE["primario_hover"], unselected_color=STYLE["fondo"],
+                unselected_hover_color=STYLE["surface_alt"], text_color=STYLE["texto_oscuro"],
+                command=self._seleccionar_catalogo_editor
+            )
+            selector.set(catalogo["titulo"])
+            selector.pack(fill="x", pady=(0, 8))
+        else:
+            ctk.CTkLabel(
+                panel, text=catalogo["titulo"], font=("Segoe UI", 13, "bold"),
+                text_color=STYLE["texto_oscuro"], anchor="w"
+            ).pack(fill="x")
+
+        cabecera = ctk.CTkFrame(panel, fg_color="transparent")
+        cabecera.pack(fill="x")
+        descripcion = ctk.CTkLabel(
+            cabecera, text=catalogo["descripcion"], font=FONT_TINY, text_color=STYLE["texto_secundario"],
+            anchor="w", justify="left", wraplength=480
+        )
+        descripcion.pack(fill="x")
+        self._ajustar_al_ancho(cabecera, [descripcion], margen=10)
+
+        buscar_fila = ctk.CTkFrame(panel, fg_color="transparent")
+        buscar_fila.pack(fill="x", pady=(10, 0))
+        self.entrada_buscar_catalogo = ctk.CTkEntry(
+            buscar_fila, placeholder_text="🔎  Buscar en el catálogo", font=FONT_SMALL, height=32
+        )
+        if self._filtro_catalogo:
+            self.entrada_buscar_catalogo.insert(0, self._filtro_catalogo)
+        self.entrada_buscar_catalogo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entrada_buscar_catalogo.bind("<KeyRelease>", lambda e: self._filtrar_catalogo_editor())
+        self.btn_quitar_valor = ctk.CTkButton(
+            buscar_fila, text="✕  Quitar", font=FONT_SMALL, height=32, width=90,
+            fg_color=STYLE["surface"], hover_color=STYLE["advertencia_suave"],
+            text_color=STYLE["advertencia"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, state="disabled", command=self._quitar_valor_catalogo
+        )
+        self.btn_quitar_valor.pack(side="right")
+        self.btn_editar_valor = ctk.CTkButton(
+            buscar_fila, text="✎  Editar", font=FONT_SMALL, height=32, width=90,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, state="disabled", command=self._editar_valor_catalogo
+        )
+        self.btn_editar_valor.pack(side="right", padx=(0, 6))
+
+        # Abajo: agregar un elemento nuevo, o guardar el que se está editando.
+        agregar_fila = ctk.CTkFrame(panel, fg_color="transparent")
+        agregar_fila.pack(side="bottom", fill="x", pady=(0, 4))
+        self.entrada_valor_catalogo = ctk.CTkEntry(
+            agregar_fila, placeholder_text="Nuevo elemento del catálogo", font=FONT_LABEL, height=34
+        )
+        self.entrada_valor_catalogo.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.entrada_valor_catalogo.bind("<Return>", lambda e: self._confirmar_valor_catalogo())
+        self.entrada_valor_catalogo.bind("<Escape>", lambda e: self._cancelar_edicion_catalogo())
+        self.btn_cancelar_valor = ctk.CTkButton(
+            agregar_fila, text="Cancelar", font=FONT_SMALL, height=34, width=90,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=self._cancelar_edicion_catalogo
+        )
+        self.btn_confirmar_valor = ctk.CTkButton(
+            agregar_fila, text="+ Agregar", font=FONT_SMALL, height=34, width=120,
+            fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+            text_color=STYLE["texto_claro"], corner_radius=6,
+            command=self._confirmar_valor_catalogo
+        )
+        self.btn_confirmar_valor.pack(side="right")
+
+        self.contador_catalogo = ctk.CTkLabel(
+            panel, text="", font=FONT_TINY, text_color=STYLE["texto_secundario"], anchor="w"
+        )
+        self.contador_catalogo.pack(side="bottom", fill="x", pady=(0, 6))
+
+        # Listbox nativo en lugar de una fila de widgets CTk por elemento: con
+        # catálogos de ~70 elementos los widgets CTk tardaban segundos en dibujarse.
+        caja = ctk.CTkFrame(panel, fg_color=STYLE["fondo"], corner_radius=8)
+        caja.pack(fill="both", expand=True, pady=(6, 4))
+        self.lista_catalogo = tk.Listbox(
+            caja, font=("Segoe UI", 11), bd=0, highlightthickness=0, activestyle="none",
+            bg=STYLE["fondo"], fg=STYLE["texto_oscuro"], selectbackground=STYLE["primario"],
+            selectforeground=STYLE["texto_oscuro"], exportselection=False
+        )
+        barra = ctk.CTkScrollbar(caja, command=self.lista_catalogo.yview)
+        self.lista_catalogo.configure(yscrollcommand=barra.set)
+        barra.pack(side="right", fill="y", padx=(0, 4), pady=6)
+        self.lista_catalogo.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=8)
+        self.lista_catalogo.bind("<<ListboxSelect>>", lambda e: self._actualizar_acciones_catalogo())
+        self.lista_catalogo.bind("<Double-Button-1>", lambda e: self._editar_valor_catalogo())
+        self.lista_catalogo.bind("<Delete>", lambda e: self._quitar_valor_catalogo())
+
+        self._valor_catalogo_editando = None
+        self._renderizar_valores_catalogo()
+
+    def _seleccionar_catalogo_editor(self, titulo):
+        lista = reglas_normas.catalogos_de(self._norma_seleccionada)
+        self._catalogo_editor = next(c["id"] for c in lista if c["titulo"] == titulo)
+        self._filtro_catalogo = ""
+        self._renderizar_catalogos_editor()
+
+    def _filtrar_catalogo_editor(self):
+        # Se espera a que el usuario deje de escribir para no redibujar la
+        # lista en cada tecla.
+        if self._filtro_catalogo_after_id:
+            self.root.after_cancel(self._filtro_catalogo_after_id)
+
+        def aplicar():
+            self._filtro_catalogo_after_id = None
+            if not self.entrada_buscar_catalogo.winfo_exists():
+                return
+            self._filtro_catalogo = self.entrada_buscar_catalogo.get().strip()
+            self._renderizar_valores_catalogo()
+
+        self._filtro_catalogo_after_id = self.root.after(200, aplicar)
+
+    def _renderizar_valores_catalogo(self, seleccionar=None):
+        catalogo = self._catalogo_actual()
+        try:
+            valores = catalogos.cargar_lista(catalogo["ruta"], catalogo["clave"], catalogo["inicial"])
+        except (OSError, ValueError) as e:
+            messagebox.showerror("No se pudo leer el catálogo", str(e))
+            return
+
+        filtro = normalizar(self._filtro_catalogo)
+        self._valores_visibles = [v for v in valores if filtro in normalizar(v)]
+        self.lista_catalogo.delete(0, "end")
+        for valor in self._valores_visibles:
+            self.lista_catalogo.insert("end", valor)
+        if seleccionar in self._valores_visibles:
+            indice = self._valores_visibles.index(seleccionar)
+            self.lista_catalogo.selection_set(indice)
+            self.lista_catalogo.see(indice)
+
+        if filtro:
+            conteo = f"{len(self._valores_visibles)} de {len(valores)} elemento(s)"
+        else:
+            conteo = f"{len(valores)} elemento(s)"
+        self.contador_catalogo.configure(text=f"{conteo} · doble clic para editar")
+        self._actualizar_acciones_catalogo()
+
+    def _valor_catalogo_seleccionado(self):
+        seleccion = self.lista_catalogo.curselection()
+        return self._valores_visibles[seleccion[0]] if seleccion else None
+
+    def _actualizar_acciones_catalogo(self):
+        estado = "normal" if self._valor_catalogo_seleccionado() else "disabled"
+        self.btn_editar_valor.configure(state=estado)
+        self.btn_quitar_valor.configure(state=estado)
+
+    def _editar_valor_catalogo(self):
+        """Pasa el elemento seleccionado al cuadro de abajo para cambiarlo.
+        Enter o ✓ guardan; Esc o Cancelar dejan el elemento como estaba."""
+        valor = self._valor_catalogo_seleccionado()
+        if not valor:
+            return
+        self._valor_catalogo_editando = valor
+        self.entrada_valor_catalogo.delete(0, "end")
+        self.entrada_valor_catalogo.insert(0, valor)
+        self.entrada_valor_catalogo.focus_set()
+        self.entrada_valor_catalogo.select_range(0, "end")
+        self.btn_confirmar_valor.configure(
+            text="✓  Guardar", fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
+            text_color=STYLE["texto_oscuro"]
+        )
+        self.btn_cancelar_valor.pack(side="right", padx=(0, 6), before=self.btn_confirmar_valor)
+
+    def _cancelar_edicion_catalogo(self):
+        self._valor_catalogo_editando = None
+        self.entrada_valor_catalogo.delete(0, "end")
+        self.btn_confirmar_valor.configure(
+            text="+ Agregar", fg_color=STYLE["secundario"], hover_color=STYLE["secundario_hover"],
+            text_color=STYLE["texto_claro"]
+        )
+        self.btn_cancelar_valor.pack_forget()
+
+    # Los catálogos se guardan al momento, igual que los campos de una norma
+    # existente; el generador los relee en cada análisis.
+    def _confirmar_valor_catalogo(self):
+        valor = self.entrada_valor_catalogo.get().strip()
+        anterior = self._valor_catalogo_editando
+        if not valor or valor == anterior:
+            if anterior:
+                self._cancelar_edicion_catalogo()
+            return
+        catalogo = self._catalogo_actual()
+        try:
+            if anterior:
+                catalogos.renombrar_valor(
+                    catalogo["ruta"], catalogo["clave"], catalogo["inicial"], anterior, valor
+                )
+            else:
+                catalogos.agregar_valor(catalogo["ruta"], catalogo["clave"], catalogo["inicial"], valor)
+        except (KeyError, ValueError, OSError) as e:
+            messagebox.showwarning("No se pudo guardar", str(e))
+            return
+        self._cancelar_edicion_catalogo()
+        # Si la búsqueda ocultaría el elemento, se limpia para que quede a la vista.
+        if normalizar(self._filtro_catalogo) not in normalizar(valor):
+            self._filtro_catalogo = ""
+            self.entrada_buscar_catalogo.delete(0, "end")
+        self._renderizar_valores_catalogo(seleccionar=valor)
+
+    def _quitar_valor_catalogo(self):
+        valor = self._valor_catalogo_seleccionado()
+        if not valor:
+            return
+        if not messagebox.askyesno(
+            "Quitar del catálogo",
+            f"¿Quitar '{valor}' del catálogo?\n\nLas reglas de la norma dejan de usarlo desde el "
+            "siguiente análisis del Excel."
+        ):
+            return
+        catalogo = self._catalogo_actual()
+        try:
+            catalogos.eliminar_valor(catalogo["ruta"], catalogo["clave"], catalogo["inicial"], valor)
+        except (ValueError, OSError) as e:
+            messagebox.showerror("No se pudo quitar", str(e))
+            return
+        if self._valor_catalogo_editando == valor:
+            self._cancelar_edicion_catalogo()
+        self._renderizar_valores_catalogo()
 
     def _renderizar_campos_editor(self):
         self._limpiar_frame(self.lista_campos_frame)

@@ -46,8 +46,12 @@ REM con rutas relativas a la carpeta donde se ejecuta el .exe, asi que la
 REM configuracion base debe quedar junto al ejecutable generado.
 if not exist "dist\data" mkdir "dist\data"
 copy /Y "data\config_etiquetas.json" "dist\data\config_etiquetas.json" >nul
-REM Catalogo editable de fibras para las reglas de la NOM-004 (nom004.py).
-copy /Y "dataibras_nom004.json" "dist\dataibras_nom004.json" >nul
+REM Catalogos editables de las reglas de las normas (se editan desde
+REM Configuracion): fibras y frases de cuidado de la NOM-004 (nom004.py)
+REM y unidades de contenido neto de la NOM-050 (nom050.py).
+copy /Y "data\fibras_nom004.json" "dist\data\fibras_nom004.json" >nul
+copy /Y "data\cuidado_nom004.json" "dist\data\cuidado_nom004.json" >nul
+copy /Y "data\unidades_nom050.json" "dist\data\unidades_nom050.json" >nul
 
 REM plantilla_asignaciones.py lee el membrete de "img\Membrete.jpg" con ruta
 REM relativa, igual que data\, asi que tambien debe ir junto al ejecutable.
