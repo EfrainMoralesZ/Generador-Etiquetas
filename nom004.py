@@ -128,6 +128,9 @@ class Nom004Validador:
     def revisar_composicion(self, texto: str, que: str) -> list[dict[str, Any]]:
         texto = re.sub(r"^(insumos?|forro)\s*:?\s*", "", texto.strip(), flags=re.I).strip()
         partes = [p.strip() for p in re.split(r"[,;\n]+", texto) if p.strip()]
+        # Si no traen separadores ("40% poliéster 60% algodón" o "poliéster 40% algodón 60%"),
+        # se separan por cada porcentaje.
+        partes = [s.strip() for p in partes for s in self._separar_por_porcentaje(p) if s.strip()]
         Que = que[:1].upper() + que[1:]
 
         fibras: list[tuple[float, str]] = []
@@ -183,6 +186,15 @@ class Nom004Validador:
             reglas.append({"regla": "Orden de predominancia", "ok": False, "mensaje": f"El {que} no va de mayor a menor porcentaje; debe ir: {debe}."})
 
         return reglas
+
+    @staticmethod
+    def _separar_por_porcentaje(parte: str) -> list[str]:
+        porcentaje = r"\d+(?:[.,]\d+)?\s*%"
+        if re.match(porcentaje, parte):  # "NN% fibra NN% fibra"
+            return re.split(rf"\s+(?:y\s+)?(?={porcentaje})", parte, flags=re.I)
+        if re.search(rf"{porcentaje}$", parte):  # "fibra NN% fibra NN%"
+            return re.split(r"(?<=%)\s+(?:y\s+)?", parte, flags=re.I)
+        return [parte]
 
     def _revisar_fibra(self, fibra: str) -> str | None:
         for correcta in self.fibras:
