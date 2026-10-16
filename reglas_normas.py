@@ -12,6 +12,16 @@ import nom141
 
 _PATRON_NUMERO_NORMA = re.compile(r"NOM-(\d+)", re.IGNORECASE)
 
+def _es_plural(palabra, palabras):
+    """Si `palabra` es el plural de otra de la lista (palabra por palabra)."""
+    partes = palabra.split()
+    return any(
+        len(otra.split()) == len(partes) and otra != palabra
+        and all(p in (o, o + "S", o + "ES") for p, o in zip(partes, otra.split()))
+        for otra in palabras
+    )
+
+
 CATALOGOS = {
     nom004.NUMERO_NORMA: [
         {
@@ -51,7 +61,8 @@ CATALOGOS = {
             "id": f"leyendas_{tipo}",
             "titulo": datos["titulo"],
             "descripcion": "Leyendas que se imprimen cuando la DESCRIPCION menciona: "
-                           + ", ".join(p.lower() for p in datos["palabras"]) + ".",
+                           + ", ".join(p.lower() for p in datos["palabras"] if not _es_plural(p, datos["palabras"]))
+                           + " (y sus plurales).",
             "ruta": nom141.CATALOGO_LEYENDAS_PATH, "clave": tipo, "inicial": datos["leyendas"],
         }
         for tipo, datos in nom141.TIPOS.items()

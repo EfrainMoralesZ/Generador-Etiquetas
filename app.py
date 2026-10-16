@@ -1768,13 +1768,16 @@ class GenerdorEtiquetas:
                 text_color=STYLE["texto_oscuro"], anchor="w"
             ).pack(fill="x")
 
-        cabecera = ctk.CTkFrame(panel, fg_color="transparent")
+        # Alto fijo (dos renglones) para que la lista no cambie de tamaño
+        # según lo larga que sea la descripción de cada catálogo.
+        cabecera = ctk.CTkFrame(panel, fg_color="transparent", height=36)
         cabecera.pack(fill="x")
+        cabecera.pack_propagate(False)
         descripcion = ctk.CTkLabel(
             cabecera, text=catalogo["descripcion"], font=FONT_TINY, text_color=STYLE["texto_secundario"],
-            anchor="w", justify="left", wraplength=480
+            anchor="nw", justify="left", wraplength=480
         )
-        descripcion.pack(fill="x")
+        descripcion.pack(fill="x", anchor="n")
         self._ajustar_al_ancho(cabecera, [descripcion], margen=10)
 
         buscar_fila = ctk.CTkFrame(panel, fg_color="transparent")
