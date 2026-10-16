@@ -46,7 +46,7 @@ Generador Etiquetas/
 ├── reglas_normas.py         # Qué reglas y catálogos tiene cada norma (para la pantalla Configuración)
 ├── build_exe.bat            # Script de empaquetado a ejecutable de Windows
 ├── requierements             # Dependencias pip (congeladas por versión)
-├── img/                      # icono.ico (ejecutable) y Membrete.jpg (fondo de cada hoja, se lee en runtime)
+├── img/                      # icono.ico (ejecutable) y Membrete.png (fondo de cada hoja, se lee en runtime)
 └── data/
     ├── config_etiquetas.json # Catálogo de normas y sus campos (editable desde "Configuración")
     ├── fibras_nom004.json    # Catálogo de fibras naturales y químicas (NOM-004)
@@ -179,7 +179,7 @@ Sin dependencia de Tkinter; se podría usar desde una CLI (de hecho tiene un `ma
 
 ### 6.1.1 `plantilla_asignaciones.py` — plantilla de impresión
 
-Replica `TJX028 CREMA FACIAL 50 ml.docx`: cada etiqueta sale en una **hoja carta** con `img/Membrete.jpg` de fondo y, de arriba abajo:
+Replica `TJX028 CREMA FACIAL 50 ml.docx`: cada etiqueta sale en una **hoja carta** con `img/Membrete.png` de fondo y, de arriba abajo:
 
 1. **Título** (Calibri negrita 11): `ASIGN DESCRIPCION CONTENIDO`. Si el Excel no trae columna de asignación se usa el EAN.
 2. **Subtítulo** fijo (Tw Cen MT 14): constante `SUBTITULO`.
@@ -195,7 +195,7 @@ Replica `TJX028 CREMA FACIAL 50 ml.docx`: cada etiqueta sale en una **hoja carta
 | `guardar_plantilla_pdf(plantilla, ruta_salida)` | Escribe el PDF con texto real (seleccionable/copiable) |
 | `guardar_plantilla_docx(plantilla, ruta_salida)` | Escribe el `.docx` editable: membrete en el encabezado, detrás del texto; la etiqueta es una tabla de tres columnas (anotación, recuadro con borde, vacía) |
 
-El membrete original viene en CMYK y pesa ~1 MB; `_membrete_rgb` lo convierte una sola vez en memoria a RGB a 200 dpi (python-docx no acepta ese JPEG tal cual) y se reutiliza en todas las hojas. Si no se encuentra `img/Membrete.jpg`, la generación se detiene con un mensaje antes de procesar filas.
+El membrete original viene en CMYK y pesa ~1 MB; `_membrete_rgb` lo convierte una sola vez en memoria a RGB a 200 dpi (python-docx no acepta ese JPEG tal cual) y se reutiliza en todas las hojas. Si no se encuentra `img/Membrete.png`, la generación se detiene con un mensaje antes de procesar filas.
 
 Si la fila trae asignación, los archivos se llaman como el título (`TJX028 CREMA FACIAL 50 ml.pdf`); si no, como antes (`<EAN>_<norma>`).
 

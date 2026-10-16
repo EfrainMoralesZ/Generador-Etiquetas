@@ -53,12 +53,12 @@ copy /Y "data\fibras_nom004.json" "dist\data\fibras_nom004.json" >nul
 copy /Y "data\cuidado_nom004.json" "dist\data\cuidado_nom004.json" >nul
 copy /Y "data\unidades_nom050.json" "dist\data\unidades_nom050.json" >nul
 
-REM plantilla_asignaciones.py lee el membrete de "img\Membrete.jpg" con ruta
+REM plantilla_asignaciones.py lee el membrete de "img\Membrete.png" con ruta
 REM relativa, igual que data\, asi que tambien debe ir junto al ejecutable.
 if not exist "dist\img" mkdir "dist\img"
-copy /Y "img\Membrete.jpg" "dist\img\Membrete.jpg" >nul
+copy /Y "img\Membrete.png" "dist\img\Membrete.png" >nul
 
 echo.
 echo Build completado. Ejecutable en:
 echo dist\GeneradorEtiquetas.exe
-echo (junto con dist\data\config_etiquetas.json y dist\img\Membrete.jpg, necesarios para que funcione)
+echo (junto con dist\data\config_etiquetas.json y dist\img\Membrete.png, necesarios para que funcione)
