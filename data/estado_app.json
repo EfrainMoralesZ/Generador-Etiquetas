@@ -54,6 +54,28 @@
       "total_filas": 100,
       "generadas": 9,
       "total_detalle": 100
+    },
+    {
+      "id": "BD_MTB_AIFA_xlsx_20261016081801",
+      "nombre_excel": "BD-MTB-AIFA.xlsx",
+      "fecha": "16/10/2026 · 08:18",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD-MTB-AIFA_20261016_081759",
+      "json_path": "data\\etiquetas\\BD-MTB-AIFA.json",
+      "detalle_path": "data\\lotes\\BD_MTB_AIFA_xlsx_20261016081801.jsonl",
+      "total_filas": 100,
+      "generadas": 9,
+      "total_detalle": 100
+    },
+    {
+      "id": "BD_MTB_AIFA_xlsx_20261016082707",
+      "nombre_excel": "BD-MTB-AIFA.xlsx",
+      "fecha": "16/10/2026 · 08:27",
+      "output_dir": "C:/Users/bost2/OneDrive/Escritorio\\Etiquetas_BD-MTB-AIFA_20261016_082705",
+      "json_path": "data\\etiquetas\\BD-MTB-AIFA.json",
+      "detalle_path": "data\\lotes\\BD_MTB_AIFA_xlsx_20261016082707.jsonl",
+      "total_filas": 100,
+      "generadas": 9,
+      "total_detalle": 100
     }
   ]
 }
