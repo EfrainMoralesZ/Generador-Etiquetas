@@ -255,18 +255,26 @@ def _filas_sin_codigo_formato(registros):
         if not (buscar_valor_columna(fila, COLUMNA_NORMA) or "").strip()
     ]
 
-def _revisar_nom004(registros):
-    """Revisa las reglas de la NOM-004 (insumo, forro y cuidado) en las filas
-    de esa norma. Devuelve {fila: (revision, observaciones)}; si alguna fila
-    trae observaciones no se genera nada del lote hasta corregir el Excel."""
+def _revisar_normas(registros):
+    """Revisa las reglas de la NOM-004 (insumo, forro y cuidado) y de la
+    NOM-141 (leyendas precautorias) en las filas de esas normas. Devuelve
+    {fila: (revision, observaciones)}; si alguna fila trae observaciones no se
+    genera nada del lote hasta corregir el Excel."""
     validador = None
     resultado = {}
     for idx, fila in enumerate(registros, start=1):
-        if extraer_numero_norma(buscar_valor_columna(fila, COLUMNA_NORMA) or "") != NUMERO_NOM004:
+        numero = extraer_numero_norma(buscar_valor_columna(fila, COLUMNA_NORMA) or "")
+        if numero == NUMERO_NOM004:
+            if validador is None:
+                validador = Nom004Validador(fibras=cargar_catalogo_fibras(), adicionales=cargar_adicionales_cuidado())
+            revision = validador.revisar(fila)
+        elif numero == nom141.NUMERO_NORMA:
+            revision = nom141.revisar(
+                _primer_valor(fila, COLUMNAS_DESCRIPCION), _primer_valor(fila, ("LEYENDAS",)),
+                _primer_valor(fila, ("INSUMOS/INGREDIENTES", "INGREDIENTES")),
+            )
+        else:
             continue
-        if validador is None:
-            validador = Nom004Validador(fibras=cargar_catalogo_fibras(), adicionales=cargar_adicionales_cuidado())
-        revision = validador.revisar(fila)
         resultado[idx] = (revision, Nom004Validador.observaciones(revision))
     return resultado
 
@@ -281,7 +289,7 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
     mapa_numero_a_norma = construir_mapa_numero_a_norma(config)
 
     registros, json_path = excel_a_json(excel_path, json_dir)
-    revisiones = _revisar_nom004(registros)
+    revisiones = _revisar_normas(registros)
 
     detalle = []
     for idx, fila in enumerate(registros, start=1):
@@ -293,7 +301,9 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
             "marca": item["marca"],
             "codigo_formato": item["codigo_formato"],
             "norma": item["norma"],
+            "descripcion": _primer_valor(fila, COLUMNAS_DESCRIPCION),
             "campos": [c for c, _ in item["campos_texto"]],
+            "campos_texto": item["campos_texto"],
             "error": item["error"],
             "revision": revision,
             "observaciones": observaciones,
@@ -301,7 +311,7 @@ def previsualizar_etiquetas_desde_excel(excel_path, config_path=DEFAULT_CONFIG_P
 
     return {
         "total_filas": len(registros),
-        "listas": sum(1 for d in detalle if not d["error"]),
+        "listas": sum(1 for d in detalle if not d["error"] and not d["observaciones"]),
         "detalle": detalle,
         "json_path": json_path,
         "filas_sin_codigo_formato": _filas_sin_codigo_formato(registros),
@@ -357,13 +367,13 @@ def generar_etiquetas_desde_excel(
             "cada etiqueta, así que hay que completarla en todas las filas antes de generar."
         )
 
-    filas_con_observaciones = _filas_con_observaciones(_revisar_nom004(registros))
+    filas_con_observaciones = _filas_con_observaciones(_revisar_normas(registros))
     if filas_con_observaciones:
         filas_txt = ", ".join(str(f) for f, _ in filas_con_observaciones[:15])
         extra = "…" if len(filas_con_observaciones) > 15 else ""
         raise ValueError(
-            f"La(s) fila(s) {filas_txt}{extra} no cumplen las reglas de la NOM-004 (insumo, forro "
-            "o instrucciones de cuidado). Corrige el Excel y vuelve a subirlo antes de generar."
+            f"La(s) fila(s) {filas_txt}{extra} no cumplen las reglas de su norma (NOM-004: insumo, "
+            "forro o cuidado; NOM-141: leyendas). Corrige el Excel y vuelve a subirlo antes de generar."
         )
 
     os.makedirs(output_dir, exist_ok=True)

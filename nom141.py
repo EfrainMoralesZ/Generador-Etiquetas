@@ -166,10 +166,21 @@ def cargar_leyendas(tipo: str) -> list[str]:
     return cargar_lista(CATALOGO_LEYENDAS_PATH, tipo, TIPOS[tipo]["leyendas"])
 
 
+def _es_el_producto(texto: str, inicio: int) -> bool:
+    """La palabra nombra al producto solo si abre la descripción ("DESODORANTE",
+    "PROTECTOR SOLAR 50 FPS") o va tras "de" ("DÚO DE DESODORANTES"); como
+    adjetivo no cuenta ("TOALLITAS DESODORANTES", "MAQUILLAJE CON EFECTO BRONCEADOR")."""
+    antes = texto[:inicio].strip()
+    return not antes or bool(re.search(r"(?:^|\s)del?$", antes))
+
+
 def detectar_tipos(descripcion: str) -> list[str]:
     """Tipos de producto que menciona la descripción."""
     texto = normalizar(descripcion or "")
-    tipos = [tipo for tipo, patron in _PATRONES_TIPO.items() if patron.search(texto)]
+    tipos = [
+        tipo for tipo, patron in _PATRONES_TIPO.items()
+        if any(_es_el_producto(texto, m.start()) for m in patron.finditer(texto))
+    ]
     if "tintes" in tipos and "permanentes" in tipos and not _PATRON_PERMANENTE_REAL.search(texto):
         tipos.remove("permanentes")
     return tipos
@@ -209,3 +220,38 @@ def _sin_repetidas(leyendas: list[str]) -> list[str]:
 def formatear_contenido(texto: str) -> str:
     """Solo el dato cuantitativo y su unidad (ej. "CONT. NET. 250 ml" -> "250 ml")."""
     return _LEYENDA_CONTENIDO.sub("", texto.strip()).strip()
+
+
+def _comparable(texto: str) -> str:
+    """Sin mayúsculas, acentos, puntuación ni saltos de línea, para buscar una
+    leyenda dentro de la celda aunque venga en otro renglón o sin punto final."""
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalizar(texto or "")).split())
+
+
+def revisar(descripcion: str, leyendas: str, ingredientes: str = "") -> list[dict]:
+    """Si la DESCRIPCION es de un tipo que exige leyendas precautorias, la
+    celda LEYENDAS del Excel debe traer todas las de ese tipo (catálogo, más
+    "Contiene ..." y "Reservado a profesionales" cuando apliquen):
+    [{columna, regla, ok, mensaje}]."""
+    tipos = detectar_tipos(descripcion)
+    regla = {"columna": "LEYENDAS", "regla": "Leyendas precautorias"}
+    if not tipos:
+        return [{**regla, "ok": True, "mensaje": "El producto no es de un tipo que requiera leyendas precautorias."}]
+    titulos = ", ".join(TIPOS[t]["titulo"].lower() for t in tipos)
+
+    celda = (leyendas or "").strip()
+    if not celda or celda.upper() in ("NAN", "N/A", "NONE"):
+        return [{**regla, "ok": False,
+                 "mensaje": f"El producto \"{descripcion}\" ({titulos}) requiere leyendas precautorias y la "
+                            "celda LEYENDAS está vacía."}]
+
+    requeridas = generar_leyendas(descripcion, ingredientes)
+    celda_comparable = f" {_comparable(celda)} "
+    faltan = [l for l in requeridas if f" {_comparable(l)} " not in celda_comparable]
+    if not faltan:
+        return [{**regla, "ok": True,
+                 "mensaje": f"Trae las {len(requeridas)} leyendas precautorias de {titulos}."}]
+    return [{**regla, "ok": False,
+             "mensaje": f"El producto \"{descripcion}\" ({titulos}) requiere leyendas precautorias y en la celda "
+                        f"LEYENDAS faltan {len(faltan)} de {len(requeridas)}:\n"
+                        + "\n".join(f"   – {l}" for l in faltan)}]

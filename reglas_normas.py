@@ -60,7 +60,7 @@ CATALOGOS = {
         {
             "id": f"leyendas_{tipo}",
             "titulo": datos["titulo"],
-            "descripcion": "Leyendas que se imprimen cuando la DESCRIPCION menciona: "
+            "descripcion": "Leyendas que se imprimen cuando la DESCRIPCION empieza con (o dice \"de ...\"): "
                            + ", ".join(p.lower() for p in datos["palabras"] if not _es_plural(p, datos["palabras"]))
                            + " (y sus plurales).",
             "ruta": nom141.CATALOGO_LEYENDAS_PATH, "clave": tipo, "inicial": datos["leyendas"],
@@ -91,6 +91,16 @@ VALIDACIONES = {
          + ". Las frases adicionales del catálogo pueden ir en cualquier parte."),
         ("Celdas que no se revisan", f"Insumo, forro o cuidado vacíos o con {_NO_REVISADAS}."),
     ],
+    nom141.NUMERO_NORMA: [
+        ("Leyendas precautorias",
+         "Si la DESCRIPCION es de un tipo con leyendas (tintes, decolorantes, permanentes, protectores "
+         "solares, desodorantes, depilatorios...), la celda LEYENDAS del Excel debe traer todas las "
+         "leyendas del catálogo de ese tipo (y \"Contiene ...\" o \"Reservado a profesionales\" cuando "
+         "apliquen). Se comparan sin importar mayúsculas, acentos, puntuación ni renglones. "
+         "El tipo cuenta solo si es el producto: al inicio de la descripción (\"DESODORANTE\") o tras "
+         "\"de\" (\"DÚO DE DESODORANTES\"); como adjetivo no (\"TOALLITAS DESODORANTES\", "
+         "\"MAQUILLAJE CON EFECTO BRONCEADOR\")."),
+    ],
 }
 
 # Formato que armadoEtiqueta.formatear_valor aplica a ciertos campos en todas
@@ -113,8 +123,8 @@ _FORMATO_NORMA = {
         (("LEYENDAS",),
          "Según la DESCRIPCION (tintes, colorantes, coloración, decolorantes, permanentes, alaciadores "
          "permanentes, protectores solares, bronceadores, autobronceadores, desodorantes, antitranspirantes, "
-         "depilatorios, epilatorios) se agregan las leyendas precautorias del catálogo de ese tipo, aunque el "
-         "Excel no traiga la columna. Si los ingredientes traen sustancias a destacar (ej. resorcinol, "
+         "depilatorios, epilatorios) se agregan las leyendas precautorias del catálogo de ese tipo (la celda "
+         "LEYENDAS del Excel debe traerlas; si viene vacía la fila queda con observación). Si los ingredientes traen sustancias a destacar (ej. resorcinol, "
          "hidroquinona, hidróxido de sodio) se agrega \"Contiene ...\"; si el producto es profesional, "
          "\"Reservado a profesionales\". Las leyendas que ya traía el Excel se conservan al final sin repetir."),
         (("CONTENIDO", "CONTENIDO NETO"),

@@ -177,6 +177,7 @@ class GenerdorEtiquetas:
         self._peticion_pagina_id = 0
         self._indices_lote = {}
         self._ventana_preview = None
+        self._ventana_analisis = None
 
         self._normas_config = {}
         self._norma_seleccionada = None
@@ -398,6 +399,13 @@ class GenerdorEtiquetas:
             centro, text="Se generará un archivo PDF y uno de Word (.docx) por cada etiqueta detectada.",
             font=FONT_TINY, text_color=STYLE["texto_secundario"]
         ).pack(anchor="w", pady=(6, 0))
+        self.btn_analisis = ctk.CTkButton(
+            centro, text="📋  Ver análisis completo", font=FONT_LABEL, height=40,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=10, state="disabled", command=self._abrir_analisis
+        )
+        self.btn_analisis.pack(fill="x", pady=(12, 0))
 
         actividad_card = ctk.CTkFrame(
             cuerpo, fg_color=STYLE["surface"], corner_radius=14,
@@ -601,6 +609,8 @@ class GenerdorEtiquetas:
         self.resultado_analisis = None
         self._render_dropzone_archivo(ruta)
         self.btn_generar.configure(state="disabled")
+        self.btn_analisis.configure(state="disabled")
+        self._cerrar_analisis()
 
         self.estado_pasos = ["completado", "progreso", "pendiente", "pendiente"]
         self._actualizar_stepper()
@@ -625,6 +635,8 @@ class GenerdorEtiquetas:
         self.progress.set(0)
         self.lbl_progreso.configure(text="")
         self.btn_generar.configure(state="disabled")
+        self.btn_analisis.configure(state="disabled")
+        self._cerrar_analisis()
         self._render_dropzone_vacio()
         self._registrar_drop_target()
 
@@ -641,6 +653,7 @@ class GenerdorEtiquetas:
         self._archivo_generado = False
         self.estado_pasos[1] = "completado"
         self._actualizar_stepper()
+        self.btn_analisis.configure(state="normal")
 
         if hasattr(self, "lbl_info_archivo"):
             self.lbl_info_archivo.configure(
@@ -665,7 +678,7 @@ class GenerdorEtiquetas:
                 "generar el lote."
             )
         elif resultado.get("filas_con_observaciones"):
-            self._mostrar_observaciones_nom004(resultado)
+            self._mostrar_observaciones(resultado)
         elif resultado["listas"] > 0:
             self.btn_generar.configure(state="normal")
             self._agregar_actividad(
@@ -679,15 +692,15 @@ class GenerdorEtiquetas:
                 "Ninguna fila coincide con una norma configurada"
             )
 
-    def _mostrar_observaciones_nom004(self, resultado):
-        """Bloquea el lote y muestra por fila las reglas de la NOM-004 (✓ cumple,
+    def _mostrar_observaciones(self, resultado):
+        """Bloquea el lote y muestra por fila las reglas de la norma (✓ cumple,
         ! no cumple) para que el usuario corrija el Excel y lo vuelva a subir."""
         self.btn_generar.configure(state="disabled")
         filas_obs = resultado["filas_con_observaciones"]
         por_fila = {d["fila"]: d for d in resultado["detalle"]}
 
         self._agregar_actividad(
-            "❌", "No cumple la NOM-004",
+            "❌", "No cumple la norma",
             f"{len(filas_obs)} fila(s) con observaciones; corrige el Excel y vuelve a subirlo"
         )
         for fila, _ in filas_obs:
@@ -698,17 +711,181 @@ class GenerdorEtiquetas:
             ]
             self._agregar_actividad("⚠️", f"Fila {fila} · EAN {item.get('ean') or '—'}", "\n".join(lineas))
 
-        resumen = []
-        for fila, observaciones in filas_obs[:8]:
-            resumen.append(f"Fila {fila}:")
-            resumen += [f"  ! {o['columna']}: {o['mensaje']}" for o in observaciones]
-        if len(filas_obs) > 8:
-            resumen.append(f"… y {len(filas_obs) - 8} fila(s) más (ver Actividad reciente).")
-        messagebox.showerror(
-            "No cumple la NOM-004",
-            "No se generará ninguna etiqueta del lote hasta corregir el Excel y volver a subirlo.\n\n"
-            + "\n".join(resumen)
+        self._abrir_analisis(filtro="Con observaciones")
+
+    # ---------------------------------------------------------------- #
+    # Ventana de análisis completo (todas las filas del Excel)
+    # ---------------------------------------------------------------- #
+    FILTROS_ANALISIS = ("Todas", "Con observaciones", "Cumplen")
+
+    @staticmethod
+    def _estado_fila(item):
+        if item.get("error"):
+            return "error"
+        if item.get("observaciones"):
+            return "observaciones"
+        return "ok"
+
+    def _cerrar_analisis(self):
+        if self._ventana_analisis is not None and self._ventana_analisis.winfo_exists():
+            self._ventana_analisis.destroy()
+        self._ventana_analisis = None
+
+    def _abrir_analisis(self, filtro="Todas"):
+        resultado = self.resultado_analisis
+        if not resultado:
+            return
+        self._cerrar_analisis()
+
+        detalle = resultado["detalle"]
+        estados = [self._estado_fila(d) for d in detalle]
+        n_obs, n_err = estados.count("observaciones"), estados.count("error")
+        nombre_archivo = os.path.basename(self.excel_path or "")
+
+        ventana = ctk.CTkToplevel(self.root)
+        self._ventana_analisis = ventana
+        ventana.title(f"Análisis · {nombre_archivo}")
+        ventana.geometry("980x720")
+        ventana.minsize(720, 480)
+        ventana.configure(fg_color=STYLE["fondo"])
+        ventana.transient(self.root)
+
+        encabezado = ctk.CTkFrame(ventana, fg_color="transparent")
+        encabezado.pack(fill="x", padx=20, pady=(18, 6))
+        ctk.CTkLabel(
+            encabezado, text=f"📋  Análisis · {nombre_archivo}",
+            font=FONT_SUBTITLE, text_color=STYLE["texto_oscuro"]
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            encabezado,
+            text=f"{len(detalle)} filas · {estados.count('ok')} cumplen · {n_obs} con observaciones"
+                 f" · {n_err} con error",
+            font=FONT_SMALL, text_color=STYLE["texto_secundario"]
+        ).pack(anchor="w", pady=(2, 0))
+
+        if n_obs or resultado.get("filas_sin_codigo_formato"):
+            aviso = ctk.CTkFrame(ventana, fg_color=STYLE["advertencia_suave"], corner_radius=8)
+            aviso.pack(fill="x", padx=20, pady=(6, 4))
+            ctk.CTkLabel(
+                aviso, text="No se generará ninguna etiqueta del lote hasta corregir el Excel y volver a subirlo.",
+                font=FONT_SMALL, text_color=STYLE["advertencia"], anchor="w"
+            ).pack(fill="x", padx=12, pady=8)
+
+        controles = ctk.CTkFrame(ventana, fg_color="transparent")
+        controles.pack(fill="x", padx=20, pady=(8, 8))
+        busqueda = ctk.CTkEntry(
+            controles, placeholder_text="🔎  Buscar por fila, EAN, descripción o texto",
+            font=FONT_SMALL, height=34
         )
+        busqueda.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        filtro_var = ctk.StringVar(value=filtro)
+        ctk.CTkSegmentedButton(
+            controles, values=list(self.FILTROS_ANALISIS), variable=filtro_var, font=FONT_SMALL,
+            selected_color=STYLE["primario"], selected_hover_color=STYLE["primario_hover"],
+            text_color=STYLE["texto_oscuro"], unselected_color=STYLE["surface"],
+            command=lambda _valor: renderizar()
+        ).pack(side="right")
+
+        caja = ctk.CTkFrame(
+            ventana, fg_color=STYLE["surface"], corner_radius=10, border_width=1, border_color=STYLE["borde"]
+        )
+        caja.pack(fill="both", expand=True, padx=20, pady=(0, 8))
+        # Un Text (y no un widget por fila) para que cientos de filas abran al instante.
+        texto = tk.Text(
+            caja, wrap="word", font=("Segoe UI", 11), bg=STYLE["surface"], fg=STYLE["texto_oscuro"],
+            relief="flat", borderwidth=0, highlightthickness=0, padx=14, pady=10, cursor="arrow"
+        )
+        barra = ctk.CTkScrollbar(caja, command=texto.yview)
+        texto.configure(yscrollcommand=barra.set)
+        barra.pack(side="right", fill="y", padx=(0, 4), pady=4)
+        texto.pack(side="left", fill="both", expand=True, padx=(2, 0), pady=2)
+
+        texto.tag_configure("titulo", font=("Segoe UI", 12, "bold"), spacing1=10)
+        texto.tag_configure("norma", font=("Segoe UI", 10), foreground=STYLE["texto_secundario"])
+        texto.tag_configure("ok", foreground=STYLE["exito"])
+        texto.tag_configure("mal", foreground=STYLE["advertencia"])
+        texto.tag_configure("sec", font=("Segoe UI", 10), foreground=STYLE["texto_secundario"])
+        texto.tag_configure("campo", font=("Segoe UI", 10, "bold"), foreground=STYLE["texto_secundario"],
+                            lmargin1=14, lmargin2=14)
+        texto.tag_configure("valor", font=("Segoe UI", 10), lmargin1=28, lmargin2=28)
+        texto.tag_configure("separador", foreground=STYLE["borde"])
+
+        pie = ctk.CTkFrame(ventana, fg_color="transparent")
+        pie.pack(fill="x", padx=20, pady=(0, 16))
+        lbl_conteo = ctk.CTkLabel(pie, text="", font=FONT_TINY, text_color=STYLE["texto_secundario"])
+        lbl_conteo.pack(side="left")
+        ctk.CTkButton(
+            pie, text="Cerrar", font=FONT_SMALL, height=34,
+            fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"],
+            corner_radius=6, command=ventana.destroy
+        ).pack(side="right")
+
+        # Texto en el que se busca cada fila (se arma una sola vez).
+        buscables = [
+            normalizar(" ".join([
+                str(d["fila"]), d.get("ean") or "", d.get("marca") or "", d.get("descripcion") or "",
+                d.get("norma") or "", d.get("error") or "",
+                *(r["mensaje"] for r in d.get("revision", [])),
+            ]))
+            for d in detalle
+        ]
+        etiquetas_estado = {
+            "ok": ("✓ Cumple", "ok"),
+            "observaciones": ("! Con observaciones", "mal"),
+            "error": ("✕ Error", "mal"),
+        }
+
+        def renderizar():
+            consulta = normalizar(busqueda.get().strip())
+            filtro_actual = filtro_var.get()
+            texto.configure(state="normal")
+            texto.delete("1.0", "end")
+            mostradas = 0
+            for d, estado, buscable in zip(detalle, estados, buscables):
+                if filtro_actual == "Con observaciones" and estado == "ok":
+                    continue
+                if filtro_actual == "Cumplen" and estado != "ok":
+                    continue
+                if consulta and consulta not in buscable:
+                    continue
+                mostradas += 1
+                etiqueta, tag = etiquetas_estado[estado]
+                texto.insert("end", f"Fila {d['fila']} · EAN {d.get('ean') or '—'}   ", "titulo")
+                texto.insert("end", etiqueta + "\n", ("titulo", tag))
+                texto.insert("end", d.get("norma") or d.get("codigo_formato") or "Sin norma", "norma")
+                if d.get("descripcion"):
+                    texto.insert("end", f"  ·  {d['descripcion']}", "norma")
+                texto.insert("end", "\n")
+                if d.get("error"):
+                    texto.insert("end", f"✕ {d['error']}\n", "mal")
+                for r in d.get("revision", []):
+                    texto.insert(
+                        "end", f"{'✓' if r['ok'] else '!'} {r['columna']}: {r['mensaje']}\n",
+                        "ok" if r["ok"] else "mal"
+                    )
+                if d.get("campos_texto"):
+                    texto.insert("end", "En la etiqueta:\n", "sec")
+                    for campo, valor in d["campos_texto"]:
+                        texto.insert("end", f"{campo}\n", "campo")
+                        texto.insert("end", f"{valor}\n", "valor")
+                texto.insert("end", "─" * 60 + "\n", "separador")
+            if not mostradas:
+                texto.insert("end", "No hay filas que coincidan con la búsqueda o el filtro.", "sec")
+            texto.configure(state="disabled")
+            texto.yview_moveto(0)
+            lbl_conteo.configure(text=f"Mostrando {mostradas} de {len(detalle)} filas")
+
+        pendiente = {"id": None}
+
+        def al_escribir(_evento=None):
+            if pendiente["id"]:
+                ventana.after_cancel(pendiente["id"])
+            pendiente["id"] = ventana.after(250, renderizar)
+
+        busqueda.bind("<KeyRelease>", al_escribir)
+        renderizar()
+        ventana.after(100, ventana.lift)
 
     def _analisis_fallido(self, mensaje):
         self.estado_pasos[1] = "pendiente"
