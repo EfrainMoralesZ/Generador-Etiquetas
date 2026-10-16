@@ -10,6 +10,7 @@ from nom004 import (
     cargar_catalogo as cargar_catalogo_fibras,
 )
 from nom050 import NUMERO_NORMA as NUMERO_NOM050, formatear_contenido
+import nom141
 from plantilla_asignaciones import (
     MEMBRETE_PATH, calcular_plantilla, guardar_plantilla_docx, guardar_plantilla_pdf,
 )
@@ -169,6 +170,26 @@ def _titulo_hoja(fila, ean):
     ]
     return " ".join(p for p in partes if p)
 
+def _campos_nom141(fila, campos, campos_texto):
+    """NOM-141: las LEYENDAS se arman según el tipo de producto de la
+    DESCRIPCION (aunque el Excel no traiga esa columna) y el CONTENIDO va sin
+    la leyenda "CONTENIDO"."""
+    textos = dict(campos_texto)
+    descripcion = _primer_valor(fila, COLUMNAS_DESCRIPCION)
+    ingredientes = _primer_valor(fila, ("INSUMOS/INGREDIENTES", "INGREDIENTES"))
+    generadas = nom141.generar_leyendas(descripcion, ingredientes)
+    resultado = []
+    for campo in campos:
+        campo_norm = campo.strip().upper()
+        texto = textos.get(campo)
+        if campo_norm == "LEYENDAS":
+            texto = nom141.combinar_leyendas(generadas, texto or "") or None
+        elif campo_norm in ("CONTENIDO", "CONTENIDO NETO") and texto:
+            texto = nom141.formatear_contenido(texto)
+        if texto:
+            resultado.append((campo, texto))
+    return resultado
+
 def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
     """Determina la norma, los campos y el estado de una fila del Excel.
 
@@ -208,6 +229,8 @@ def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
             (campo, formatear_contenido(texto) if campo.strip().upper() == "CONTENIDO" else texto)
             for campo, texto in campos_texto
         ]
+    elif numero == nom141.NUMERO_NORMA:
+        campos_texto = _campos_nom141(fila, campos, campos_texto)
 
     item["norma"] = norma
     item["campos_texto"] = campos_texto

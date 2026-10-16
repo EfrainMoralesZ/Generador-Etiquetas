@@ -1,0 +1,53 @@
+{
+    "tintes": [
+        "Los colorantes del cabello pueden causar reacciones alérgicas graves.",
+        "Lea y siga las instrucciones.",
+        "Este producto no está destinado a utilizarse en personas menores de dieciséis años.",
+        "Los tatuajes temporales de «henna negra» pueden aumentar el riesgo de alergia.",
+        "No utilice el tinte capilar:",
+        "Si tiene una erupción cutánea en el rostro o tiene el cuero cabelludo sensible, irritado o dañado.",
+        "Si alguna vez ha experimentado cualquier tipo de reacción después de la coloración del cabello.",
+        "Si alguna vez ha experimentado una reacción a los tatuajes temporales de «henna negra».",
+        "Realice una prueba preliminar de acuerdo a las instrucciones.",
+        "Puede causar alergia en algunas personas.",
+        "Suspenda su empleo en caso de irritación.",
+        "No se aplique en cejas o pestañas.",
+        "Evite el contacto con los ojos.",
+        "No se deje al alcance de los niños.",
+        "Primeros auxilios: en caso de contacto con los ojos, enjuáguese inmediatamente con abundante agua; en caso de ingestión, no provoque el vómito y consulte a un médico.",
+        "Use guantes apropiados.",
+        "En caso de que el producto entre en contacto con los ojos, enjuáguelos inmediatamente con agua."
+    ],
+    "solares": [
+        "Aplíquese antes de la exposición al sol.",
+        "Para mantener la protección, repita con frecuencia la aplicación del producto, especialmente después de transpirar, bañarse o secarse.",
+        "Aplique a la piel la cantidad suficiente."
+    ],
+    "decolorantes": [
+        "Evite el contacto con los ojos.",
+        "En caso de que el producto entre en contacto con los ojos, enjuáguelos inmediatamente con agua.",
+        "Use guantes apropiados.",
+        "No se aplique si la piel cabelluda está irritada.",
+        "Suspenda su empleo en caso de irritación.",
+        "No se aplique en cejas o pestañas.",
+        "No se deje al alcance de los niños.",
+        "Primeros auxilios: en caso de contacto con los ojos, enjuáguese inmediatamente con abundante agua; en caso de ingestión, no provoque el vómito y consulte a un médico."
+    ],
+    "permanentes": [
+        "No se aplique en cejas o pestañas.",
+        "Evite el contacto con los ojos. Puede causar ceguera.",
+        "Úsese exclusivamente conforme al instructivo.",
+        "No se deje al alcance de los niños.",
+        "Primeros auxilios: en caso de contacto con los ojos, enjuáguese inmediatamente con abundante agua; en caso de ingestión, no provoque el vómito y consulte a un médico."
+    ],
+    "desodorantes": [
+        "No se aplique sobre piel irritada o lastimada.",
+        "Descontinúe su uso en caso de presentarse irritación, enrojecimiento o alguna molestia.",
+        "No se deje al alcance de los niños."
+    ],
+    "depilatorios": [
+        "No se aplique sobre piel irritada o lastimada.",
+        "No se deje al alcance de los niños.",
+        "Evite el contacto con los ojos."
+    ]
+}

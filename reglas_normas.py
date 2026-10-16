@@ -2,12 +2,13 @@
 """Describe, por número de norma (igual que el generador las identifica), qué
 reglas aplica el sistema y qué catálogos editables usan esas reglas.
 
-Las reglas viven en código (nom004.py, nom050.py, armadoEtiqueta.formatear_valor);
+Las reglas viven en código (nom004.py, nom050.py, nom141.py, armadoEtiqueta.formatear_valor);
 aquí solo se describen para mostrarlas. Los catálogos sí se editan desde la app."""
 import re
 
 import nom004
 import nom050
+import nom141
 
 _PATRON_NUMERO_NORMA = re.compile(r"NOM-(\d+)", re.IGNORECASE)
 
@@ -44,6 +45,16 @@ CATALOGOS = {
             "ruta": nom050.CATALOGO_UNIDADES_PATH, "clave": "contenido_neto",
             "inicial": nom050.UNIDADES_CONTENIDO_NETO,
         },
+    ],
+    nom141.NUMERO_NORMA: [
+        {
+            "id": f"leyendas_{tipo}",
+            "titulo": datos["titulo"],
+            "descripcion": "Leyendas que se imprimen cuando la DESCRIPCION menciona: "
+                           + ", ".join(p.lower() for p in datos["palabras"]) + ".",
+            "ruta": nom141.CATALOGO_LEYENDAS_PATH, "clave": tipo, "inicial": datos["leyendas"],
+        }
+        for tipo, datos in nom141.TIPOS.items()
     ],
 }
 
@@ -87,6 +98,18 @@ _FORMATO_GENERAL = [
 
 # Formatos propios de una norma; reemplazan al general del mismo campo.
 _FORMATO_NORMA = {
+    nom141.NUMERO_NORMA: [
+        (("LEYENDAS",),
+         "Según la DESCRIPCION (tintes, colorantes, coloración, decolorantes, permanentes, alaciadores "
+         "permanentes, protectores solares, bronceadores, autobronceadores, desodorantes, antitranspirantes, "
+         "depilatorios, epilatorios) se agregan las leyendas precautorias del catálogo de ese tipo, aunque el "
+         "Excel no traiga la columna. Si los ingredientes traen sustancias a destacar (ej. resorcinol, "
+         "hidroquinona, hidróxido de sodio) se agrega \"Contiene ...\"; si el producto es profesional, "
+         "\"Reservado a profesionales\". Las leyendas que ya traía el Excel se conservan al final sin repetir."),
+        (("CONTENIDO", "CONTENIDO NETO"),
+         "Solo el dato y su unidad (ej. 250 ml): se quita \"CONTENIDO\", \"CONTENIDO NETO\", \"CONT\" o "
+         "\"CONT. NET.\" si la celda los trae. Va en negrita y más grande."),
+    ],
     nom050.NUMERO_NORMA: [
         (("CONTENIDO",),
          "Si trae una unidad del catálogo de unidades de contenido neto (ej. 500 ml, 1 kg) se antepone "
