@@ -786,6 +786,22 @@ class GenerdorEtiquetas:
             command=lambda _valor: renderizar()
         ).pack(side="right")
 
+        # Filtro por norma: un mismo Excel puede traer filas de varias normas.
+        normas_fila = [d.get("norma") or d.get("codigo_formato") or "Sin norma" for d in detalle]
+        TODAS_NORMAS = "Todas las normas"
+        norma_var = ctk.StringVar(value=TODAS_NORMAS)
+        normas_unicas = sorted(set(normas_fila))
+        if len(normas_unicas) > 1:
+            conteo_normas = {n: normas_fila.count(n) for n in normas_unicas}
+            opciones_norma = {f"{n} ({conteo_normas[n]})": n for n in normas_unicas}
+            ctk.CTkOptionMenu(
+                controles, values=[TODAS_NORMAS, *opciones_norma], font=FONT_SMALL,
+                dropdown_font=FONT_SMALL, height=34, fg_color=STYLE["surface"],
+                button_color=STYLE["primario"], button_hover_color=STYLE["primario_hover"],
+                text_color=STYLE["texto_oscuro"],
+                command=lambda valor: (norma_var.set(opciones_norma.get(valor, TODAS_NORMAS)), renderizar())
+            ).pack(side="right", padx=(0, 12))
+
         caja = ctk.CTkFrame(
             ventana, fg_color=STYLE["surface"], corner_radius=10, border_width=1, border_color=STYLE["borde"]
         )
@@ -839,10 +855,13 @@ class GenerdorEtiquetas:
         def renderizar():
             consulta = normalizar(busqueda.get().strip())
             filtro_actual = filtro_var.get()
+            norma_actual = norma_var.get()
             texto.configure(state="normal")
             texto.delete("1.0", "end")
             mostradas = 0
-            for d, estado, buscable in zip(detalle, estados, buscables):
+            for d, estado, buscable, norma in zip(detalle, estados, buscables, normas_fila):
+                if norma_actual != TODAS_NORMAS and norma != norma_actual:
+                    continue
                 if filtro_actual == "Con observaciones" and estado == "ok":
                     continue
                 if filtro_actual == "Cumplen" and estado != "ok":
