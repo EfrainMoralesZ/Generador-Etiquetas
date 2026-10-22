@@ -18,7 +18,7 @@ except Exception:
     DND_FILES = None
     TkinterDnD = None
 
-from armadoEtiqueta import generar_etiquetas_desde_excel, previsualizar_etiquetas_desde_excel
+from armadoEtiqueta import es_nom189, generar_etiquetas_desde_excel, previsualizar_etiquetas_desde_excel
 import catalogos
 import configuracion
 import reglas_normas
@@ -178,6 +178,8 @@ class GenerdorEtiquetas:
         self._indices_lote = {}
         self._ventana_preview = None
         self._ventana_analisis = None
+        # Filas NOM-189 que el ejecutivo técnico marcó "Libre de leyendas precautorias".
+        self._filas_sin_leyendas = set()
 
         self._normas_config = {}
         self._norma_seleccionada = None
@@ -607,6 +609,7 @@ class GenerdorEtiquetas:
 
         self.excel_path = ruta
         self.resultado_analisis = None
+        self._filas_sin_leyendas = set()
         self._render_dropzone_archivo(ruta)
         self.btn_generar.configure(state="disabled")
         self.btn_analisis.configure(state="disabled")
@@ -630,6 +633,7 @@ class GenerdorEtiquetas:
 
         self.excel_path = None
         self.resultado_analisis = None
+        self._filas_sin_leyendas = set()
         self.estado_pasos = ["pendiente"] * 4
         self._actualizar_stepper()
         self.progress.set(0)
@@ -703,13 +707,21 @@ class GenerdorEtiquetas:
             "❌", "No cumple la norma",
             f"{len(filas_obs)} fila(s) con observaciones; corrige el Excel y vuelve a subirlo"
         )
-        for fila, _ in filas_obs:
+        # Solo las primeras en el panel: con miles de filas crear un widget por
+        # cada una congela la app. El detalle completo está en la ventana de análisis.
+        for fila, _ in filas_obs[:self.MAX_OBSERVACIONES_ACTIVIDAD]:
             item = por_fila.get(fila, {})
             lineas = [
                 f"{'✓' if r['ok'] else '!'} {r['columna']}: {r['mensaje']}"
                 for r in item.get("revision", [])
             ]
             self._agregar_actividad("⚠️", f"Fila {fila} · EAN {item.get('ean') or '—'}", "\n".join(lineas))
+        restantes = len(filas_obs) - self.MAX_OBSERVACIONES_ACTIVIDAD
+        if restantes > 0:
+            self._agregar_actividad(
+                "📋", f"Y {restantes} fila(s) más con observaciones",
+                "Revísalas en la ventana de análisis (filtro \"Con observaciones\")"
+            )
 
         self._abrir_analisis(filtro="Con observaciones")
 
@@ -717,6 +729,10 @@ class GenerdorEtiquetas:
     # Ventana de análisis completo (todas las filas del Excel)
     # ---------------------------------------------------------------- #
     FILTROS_ANALISIS = ("Todas", "Con observaciones", "Cumplen")
+    # Filas por página en la ventana de análisis y filas con observaciones que
+    # se listan en el panel de actividad; más allá de eso Tk se vuelve lento.
+    FILAS_POR_PAGINA_ANALISIS = 200
+    MAX_OBSERVACIONES_ACTIVIDAD = 20
 
     @staticmethod
     def _estado_fila(item):
@@ -837,6 +853,22 @@ class GenerdorEtiquetas:
             corner_radius=6, command=ventana.destroy
         ).pack(side="right")
 
+        # Paginación: escribir miles de filas de golpe en el Text congela la ventana.
+        estilo_pagina = dict(
+            font=FONT_SMALL, height=34, width=40, fg_color=STYLE["surface"], hover_color=STYLE["surface_alt"],
+            text_color=STYLE["texto_oscuro"], border_width=1, border_color=STYLE["borde"], corner_radius=6,
+        )
+        paginacion = ctk.CTkFrame(pie, fg_color="transparent")
+        paginacion.pack(side="right", padx=(0, 16))
+        btn_anterior = ctk.CTkButton(paginacion, text="◀", command=lambda: cambiar_pagina(-1), **estilo_pagina)
+        btn_anterior.pack(side="left")
+        lbl_pagina = ctk.CTkLabel(paginacion, text="", font=FONT_SMALL, text_color=STYLE["texto_secundario"])
+        lbl_pagina.pack(side="left", padx=10)
+        btn_siguiente = ctk.CTkButton(paginacion, text="▶", command=lambda: cambiar_pagina(1), **estilo_pagina)
+        btn_siguiente.pack(side="left")
+        pagina = {"actual": 0}
+        casillas = []  # checkboxes NOM-189 incrustados en el Text de la página actual
+
         # Texto en el que se busca cada fila (se arma una sola vez).
         buscables = [
             normalizar(" ".join([
@@ -852,13 +884,11 @@ class GenerdorEtiquetas:
             "error": ("✕ Error", "mal"),
         }
 
-        def renderizar():
+        def renderizar(reiniciar_pagina=True):
             consulta = normalizar(busqueda.get().strip())
             filtro_actual = filtro_var.get()
             norma_actual = norma_var.get()
-            texto.configure(state="normal")
-            texto.delete("1.0", "end")
-            mostradas = 0
+            coincidencias = []
             for d, estado, buscable, norma in zip(detalle, estados, buscables, normas_fila):
                 if norma_actual != TODAS_NORMAS and norma != norma_actual:
                     continue
@@ -868,7 +898,22 @@ class GenerdorEtiquetas:
                     continue
                 if consulta and consulta not in buscable:
                     continue
-                mostradas += 1
+                coincidencias.append((d, estado))
+
+            por_pagina = self.FILAS_POR_PAGINA_ANALISIS
+            total_paginas = max(1, -(-len(coincidencias) // por_pagina))
+            if reiniciar_pagina:
+                pagina["actual"] = 0
+            pagina["actual"] = min(pagina["actual"], total_paginas - 1)
+            inicio = pagina["actual"] * por_pagina
+            visibles = coincidencias[inicio:inicio + por_pagina]
+
+            texto.configure(state="normal")
+            for casilla in casillas:
+                casilla.destroy()
+            casillas.clear()
+            texto.delete("1.0", "end")
+            for d, estado in visibles:
                 etiqueta, tag = etiquetas_estado[estado]
                 texto.insert("end", f"Fila {d['fila']} · EAN {d.get('ean') or '—'}   ", "titulo")
                 texto.insert("end", etiqueta + "\n", ("titulo", tag))
@@ -876,6 +921,24 @@ class GenerdorEtiquetas:
                 if d.get("descripcion"):
                     texto.insert("end", f"  ·  {d['descripcion']}", "norma")
                 texto.insert("end", "\n")
+                sin_leyendas = d["fila"] in self._filas_sin_leyendas
+                if es_nom189(d.get("norma")) and not d.get("error"):
+                    # NOM-189: no hay catálogo de qué productos llevan leyendas,
+                    # así que el ejecutivo técnico lo evalúa a mano.
+                    casilla = ctk.CTkCheckBox(
+                        texto, text="Libre de leyendas precautorias (la etiqueta se imprime sin LEYENDAS)",
+                        font=FONT_SMALL, text_color=STYLE["texto_oscuro"], bg_color=STYLE["surface"],
+                        fg_color=STYLE["primario"], hover_color=STYLE["primario_hover"],
+                        checkmark_color=STYLE["texto_oscuro"], checkbox_width=18, checkbox_height=18,
+                        command=lambda fila=d["fila"]: marcar_sin_leyendas(fila),
+                    )
+                    if sin_leyendas:
+                        casilla.select()
+                    casillas.append(casilla)
+                    texto.window_create("end", window=casilla, padx=2, pady=4)
+                    texto.insert("end", "\n")
+                else:
+                    sin_leyendas = False
                 if d.get("error"):
                     texto.insert("end", f"✕ {d['error']}\n", "mal")
                 for r in d.get("revision", []):
@@ -886,14 +949,38 @@ class GenerdorEtiquetas:
                 if d.get("campos_texto"):
                     texto.insert("end", "En la etiqueta:\n", "sec")
                     for campo, valor in d["campos_texto"]:
+                        if sin_leyendas and campo.strip().upper() == "LEYENDAS":
+                            continue
                         texto.insert("end", f"{campo}\n", "campo")
                         texto.insert("end", f"{valor}\n", "valor")
                 texto.insert("end", "─" * 60 + "\n", "separador")
-            if not mostradas:
+            if not coincidencias:
                 texto.insert("end", "No hay filas que coincidan con la búsqueda o el filtro.", "sec")
             texto.configure(state="disabled")
             texto.yview_moveto(0)
-            lbl_conteo.configure(text=f"Mostrando {mostradas} de {len(detalle)} filas")
+
+            if len(coincidencias) > por_pagina:
+                lbl_conteo.configure(
+                    text=f"Mostrando {inicio + 1}–{inicio + len(visibles)} de {len(coincidencias)} filas "
+                         f"({len(detalle)} en total)"
+                )
+            else:
+                lbl_conteo.configure(text=f"Mostrando {len(coincidencias)} de {len(detalle)} filas")
+            lbl_pagina.configure(text=f"Página {pagina['actual'] + 1} de {total_paginas}")
+            btn_anterior.configure(state="normal" if pagina["actual"] > 0 else "disabled")
+            btn_siguiente.configure(state="normal" if pagina["actual"] < total_paginas - 1 else "disabled")
+
+        def cambiar_pagina(delta):
+            pagina["actual"] = max(0, pagina["actual"] + delta)
+            renderizar(reiniciar_pagina=False)
+
+        def marcar_sin_leyendas(fila):
+            self._filas_sin_leyendas ^= {fila}
+            # Se redibuja la página para quitar/mostrar LEYENDAS en "En la
+            # etiqueta", sin perder la posición del scroll.
+            posicion = texto.yview()[0]
+            renderizar(reiniciar_pagina=False)
+            texto.yview_moveto(posicion)
 
         pendiente = {"id": None}
 
@@ -933,6 +1020,7 @@ class GenerdorEtiquetas:
 
         total = self.resultado_analisis["total_filas"] or 1
         self._contador_generadas = 0
+        ultimo_pct = {"valor": -1}
 
         self._agregar_actividad("🖨️", "Generando PDF y Word", "Creando etiquetas… esto puede tardar unos segundos")
 
@@ -940,10 +1028,15 @@ class GenerdorEtiquetas:
             if mensaje.startswith("Fila "):
                 self._contador_generadas += 1
                 pct = min(self._contador_generadas / total, 1.0)
-                self.root.after(0, self._actualizar_progreso, pct)
+                # Solo cuando cambia el porcentaje entero: con miles de filas,
+                # un after() por fila satura la cola de eventos de Tk.
+                if int(pct * 100) != ultimo_pct["valor"]:
+                    ultimo_pct["valor"] = int(pct * 100)
+                    self.root.after(0, self._actualizar_progreso, pct)
 
         hilo = threading.Thread(
-            target=self._generar_en_hilo, args=(self.excel_path, carpeta_salida, on_log), daemon=True
+            target=self._generar_en_hilo, args=(self.excel_path, carpeta_salida, on_log, set(self._filas_sin_leyendas)),
+            daemon=True
         )
         hilo.start()
 
@@ -951,9 +1044,11 @@ class GenerdorEtiquetas:
         self.progress.set(pct)
         self.lbl_progreso.configure(text=f"{int(pct * 100)}%")
 
-    def _generar_en_hilo(self, excel_path, carpeta_salida, on_log):
+    def _generar_en_hilo(self, excel_path, carpeta_salida, on_log, filas_sin_leyendas):
         try:
-            resultado = generar_etiquetas_desde_excel(excel_path, carpeta_salida, log_callback=on_log)
+            resultado = generar_etiquetas_desde_excel(
+                excel_path, carpeta_salida, log_callback=on_log, filas_sin_leyendas=filas_sin_leyendas
+            )
             self.root.after(0, self._generacion_completada, resultado)
         except Exception as e:
             self.root.after(0, self._generacion_fallida, str(e))
@@ -1634,8 +1729,11 @@ class GenerdorEtiquetas:
 
         cuerpo = ctk.CTkFrame(pagina, fg_color="transparent")
         cuerpo.pack(fill="both", expand=True, padx=30, pady=(10, 24))
-        cuerpo.grid_columnconfigure(0, weight=2)
-        cuerpo.grid_columnconfigure(1, weight=3)
+        # "uniform" fija la proporción 2:3 sin importar lo que pida cada lado; sin
+        # él la pestaña Catálogos (con muchos botones) ensancha el editor y
+        # encoge la lista de normas.
+        cuerpo.grid_columnconfigure(0, weight=2, uniform="configuracion")
+        cuerpo.grid_columnconfigure(1, weight=3, uniform="configuracion")
         cuerpo.grid_rowconfigure(0, weight=1)
 
         lista_card = ctk.CTkFrame(

@@ -9,6 +9,7 @@ import re
 import nom004
 import nom050
 import nom141
+import nom189
 
 _PATRON_NUMERO_NORMA = re.compile(r"NOM-(\d+)", re.IGNORECASE)
 
@@ -67,6 +68,15 @@ CATALOGOS = {
         }
         for tipo, datos in nom141.TIPOS.items()
     ],
+    nom189.NUMERO_NORMA: [
+        {
+            "id": f"leyendas189_{tipo}",
+            "titulo": datos["titulo"],
+            "descripcion": datos["criterio"],
+            "ruta": nom189.CATALOGO_LEYENDAS_PATH, "clave": tipo, "inicial": datos["leyendas"],
+        }
+        for tipo, datos in nom189.TIPOS.items()
+    ],
 }
 
 _NO_REVISADAS = ", ".join(v for v in sorted(nom004.NO_APLICA) if v not in ("", "NAN", "NONE"))
@@ -101,6 +111,13 @@ VALIDACIONES = {
          "\"de\" (\"DÚO DE DESODORANTES\"); como adjetivo no (\"TOALLITAS DESODORANTES\", "
          "\"MAQUILLAJE CON EFECTO BRONCEADOR\")."),
     ],
+    nom189.NUMERO_NORMA: [
+        ("Leyendas precautorias (revisión manual)",
+         "No se validan automáticamente: no hay un catálogo de qué productos llevan cada leyenda. En la "
+         "ventana de análisis, cada fila de esta norma tiene la casilla \"Libre de leyendas precautorias\" "
+         "para que el ejecutivo técnico la marque tras evaluar el producto. No bloquea la generación. Los "
+         "catálogos de esta norma son solo de referencia."),
+    ],
 }
 
 # Formato que armadoEtiqueta.formatear_valor aplica a ciertos campos en todas
@@ -130,6 +147,11 @@ _FORMATO_NORMA = {
         (("CONTENIDO", "CONTENIDO NETO"),
          "Solo el dato y su unidad (ej. 250 ml): se quita \"CONTENIDO\", \"CONTENIDO NETO\", \"CONT\" o "
          "\"CONT. NET.\" si la celda los trae. Va en negrita y más grande."),
+    ],
+    nom189.NUMERO_NORMA: [
+        (("LEYENDAS",),
+         "Se imprime lo que traiga la celda LEYENDAS del Excel, tal cual. Si en el análisis se marcó "
+         "\"Libre de leyendas precautorias\" en la fila, la etiqueta se imprime sin LEYENDAS."),
     ],
     nom050.NUMERO_NORMA: [
         (("CONTENIDO",),

@@ -11,6 +11,7 @@ from nom004 import (
 )
 from nom050 import NUMERO_NORMA as NUMERO_NOM050, formatear_contenido
 import nom141
+import nom189
 from plantilla_asignaciones import (
     MEMBRETE_PATH, calcular_plantilla, guardar_plantilla_docx, guardar_plantilla_pdf,
 )
@@ -190,6 +191,11 @@ def _campos_nom141(fila, campos, campos_texto):
             resultado.append((campo, texto))
     return resultado
 
+def es_nom189(norma):
+    """Si el nombre de norma (clave de config) es la NOM-189."""
+    match = re.search(r"NOM-(\d+)", str(norma or "").upper())
+    return bool(match) and int(match.group(1)) == nom189.NUMERO_NORMA
+
 def _analizar_fila(fila, idx, mapa_numero_a_norma, config):
     """Determina la norma, los campos y el estado de una fila del Excel.
 
@@ -257,7 +263,9 @@ def _filas_sin_codigo_formato(registros):
 
 def _revisar_normas(registros):
     """Revisa las reglas de la NOM-004 (insumo, forro y cuidado) y de la
-    NOM-141 (leyendas precautorias) en las filas de esas normas. Devuelve
+    NOM-141 (leyendas precautorias) en las filas de esas normas. Las leyendas
+    de la NOM-189 no se revisan aquí: las evalúa el ejecutivo técnico a mano
+    (ver generar_etiquetas_desde_excel, filas_sin_leyendas). Devuelve
     {fila: (revision, observaciones)}; si alguna fila trae observaciones no se
     genera nada del lote hasta corregir el Excel."""
     validador = None
@@ -338,7 +346,13 @@ def generar_etiquetas_desde_excel(
     config_path=DEFAULT_CONFIG_PATH,
     json_dir=DEFAULT_JSON_DIR,
     log_callback=None,
+    filas_sin_leyendas=(),
 ):
+    """`filas_sin_leyendas`: números de fila de la NOM-189 que el ejecutivo
+    técnico marcó como libres de leyendas precautorias; se imprimen sin el
+    campo LEYENDAS."""
+    filas_sin_leyendas = set(filas_sin_leyendas)
+
     def log(mensaje):
         if log_callback:
             log_callback(mensaje)
@@ -386,6 +400,8 @@ def generar_etiquetas_desde_excel(
 
     for idx, fila in enumerate(registros, start=1):
         item = _analizar_fila(fila, idx, mapa_numero_a_norma, config)
+        if idx in filas_sin_leyendas and es_nom189(item["norma"]):
+            item["campos_texto"] = [(c, t) for c, t in item["campos_texto"] if c.strip().upper() != "LEYENDAS"]
         registro = {
             "fila": item["fila"],
             "ean": item["ean"],

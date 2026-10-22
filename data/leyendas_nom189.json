@@ -1,0 +1,32 @@
+{
+    "toxicos": [
+        "Contiene sustancias tóxicas cuya ingestión, inhalación o contacto directo inmediato o prolongado pueden originar graves daños a la salud.",
+        "No se deje al alcance de los niños."
+    ],
+    "corrosivos": [
+        "Lea la etiqueta antes de usar este producto.",
+        "CORROSIVO",
+        "No reutilice el envase; una vez terminado el contenido, deséchelo.",
+        "Utilice guantes al emplear este producto.",
+        "No se deje al alcance de los niños.",
+        "En caso de ingestión accidental, no provoque el vómito y obtenga ayuda médica de inmediato.",
+        "En caso de contacto con la piel o con los ojos, enjuague con abundante agua y obtenga ayuda médica."
+    ],
+    "inflamables": [
+        "INFLAMABLE",
+        "Mantener lejos del fuego y de instalaciones eléctricas."
+    ],
+    "presurizados": [
+        "No se use cerca de los ojos o flama.",
+        "No se queme ni perfore el envase.",
+        "No se exponga al calor.",
+        "No se deje al alcance de los niños."
+    ],
+    "no_mezclar": [
+        "No se mezcle con otros productos."
+    ],
+    "irritantes": [
+        "Puede provocar irritación en la piel y en mucosas.",
+        "Utilice guantes al emplear este producto."
+    ]
+}
